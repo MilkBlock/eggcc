@@ -15,6 +15,9 @@ target/
 # vim prefs
 .*.swp
 
+# Humanize RLCR loop state
+.humanize/
+
 # Added by cargo
 
 /target
