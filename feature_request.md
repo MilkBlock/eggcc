@@ -35,5 +35,25 @@
 
 ## 条目列表
 
-（暂空）
+### 支持 `function` 自定义 `:merge` / `:no-merge`（用于迁移 `LoopNumItersGuess`）
+- 发现日期：2026-03-12
+- 影响文件：`dag_in_context/src/schema.egg`
+- 阻塞范围：`LoopNumItersGuess` 的 function 声明（文件末尾附近）
 
+**原 `.egg` 片段（尽量最小化）**
+```lisp
+(function LoopNumItersGuess (Expr Expr) i64 :merge (max 1 (min old new)))
+```
+
+**期望语义**
+- 声明一个函数表 `LoopNumItersGuess : (Expr, Expr) -> i64`，并使用自定义 merge 表达式把 `old/new` 合并成一个更保守的迭代次数猜测（`max 1 (min old new)`）。
+
+**为什么当前无法翻译**
+- crates.io `eggplant` 0.2.7 的 `#[eggplant::func]` 宏目前只支持 `output=...`，未暴露 `:merge` / `:no-merge` 的配置。
+- `eggplant::wrap::EgglogTypeRegistry::collect_type_defs()` 目前对函数的 `merge` 固定输出为 `new`，无法表达上述 merge 逻辑。
+
+**建议的解决方向（可选）**
+- 最小可行支持：
+  - 扩展 `#[eggplant::func]`：支持 `merge = "<egglog expr>"` 或 `no_merge`（并在 type registry 生成对应的 egglog `function` 声明）。
+- 可能的替代实现（临时）：
+  - 在迁移 `schema.egg` 时，先保留该条 `function` 的原始 egglog 文本（字符串）作为 fragment 的一部分，待 eggplant 支持补齐后再替换。
