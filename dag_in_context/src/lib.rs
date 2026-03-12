@@ -54,10 +54,24 @@ pub mod extractiongymfastergreedydag;
 pub mod fastercbcextractor;
 pub mod pretty_print;
 pub mod schedule;
+#[cfg(feature = "eggplant")]
+mod eggplant_backend;
 
 pub type Result = std::result::Result<(), MainError>;
 
 pub fn prologue() -> String {
+    #[cfg(feature = "eggplant")]
+    {
+        return eggplant_backend::prologue();
+    }
+
+    #[cfg(not(feature = "eggplant"))]
+    {
+        return prologue_egglog_text();
+    }
+}
+
+pub(crate) fn prologue_egglog_text() -> String {
     [
         include_str!("schema.egg"),
         include_str!("type_analysis.egg"),
