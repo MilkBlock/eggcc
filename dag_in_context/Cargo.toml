@@ -38,3 +38,6 @@ serde = "1.0.217"
 clap = { version = "4.4.7", features = ["derive"] }
 tempfile = "3.10"
 libc = "0.2"
+
+[dev-dependencies]
+similar = "2.7.0"
