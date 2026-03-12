@@ -15,6 +15,7 @@ jobs:
     - run: cargo install cargo-insta
     - run: make runtime
     - run: make test
+    - run: cd dag_in_context && cargo test --features eggplant
   nits:
     runs-on: ubuntu-latest
     steps:
