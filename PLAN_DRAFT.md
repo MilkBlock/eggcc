@@ -1,0 +1,1 @@
+进行本仓库的 `.egg` 重写：将 `.egg` 文件转化成依赖 `eggplant` 库的 Rust 代码。只需要阅读 `../eggplant_backup` 里的 skills（尤其是 *Eggplant translation skill*），不需要通读 examples。旧的 `.egg` 版本与新的 `eggplant` Rust 版本通过 Cargo feature 机制进行切换共存；最终验收标准是 `eggplant` 版本与 `.egg` 版本一样通过所有测试。出现 unsupported 语法先跳过该部分并更新 `./feature_request.md`。重写顺序按编译流程从前到后用到的 `.egg` 文件顺序推进。
