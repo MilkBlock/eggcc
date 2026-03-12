@@ -1,4 +1,5 @@
 mod schema;
+mod schema_dsl;
 
 pub(crate) fn prologue() -> String {
     // Ensure the `eggplant` dependency is linked when this feature is enabled,
@@ -51,38 +52,109 @@ pub(crate) fn prologue() -> String {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn schema_fragment_matches_schema_file() {
-        let expected = include_str!("../schema.egg");
-        let actual = super::schema::fragment();
+    fn strip_schema_types_section(program: &str) -> String {
+        const TYPES_HEADER: &str = r#"; =================================
+; Types
+; =================================
 
-        let diff = if expected == actual {
-            String::new()
-        } else {
-            similar::TextDiff::from_lines(expected, &actual)
-                .unified_diff()
-                .header("schema.egg", "schema::fragment()")
-                .to_string()
-        };
+"#;
+        const ASSUMPTIONS_HEADER: &str = r#"; =================================
+; Assumptions
+; =================================
 
-        insta::assert_snapshot!(diff, @"");
+"#;
+
+        let types_header_start = program
+            .find(TYPES_HEADER)
+            .expect("schema.egg must contain the Types section header");
+        let types_body_start = types_header_start + TYPES_HEADER.len();
+        let assumptions_header_start = program
+            .find(ASSUMPTIONS_HEADER)
+            .expect("schema.egg must contain the Assumptions section header");
+
+        let mut stripped = String::new();
+        stripped.push_str(&program[..types_body_start]);
+        stripped.push_str(&program[assumptions_header_start..]);
+        stripped
+    }
+
+    fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
+        let binding = "__rlcr_expr";
+        let program = format!("{prologue}\n(let {binding} {expr})\n");
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+
+        let mut termdag = egglog::TermDag::default();
+        let (sort, value) = egraph
+            .eval_expr(&egglog::ast::Expr::Var(
+                egglog::ast::Span::Panic,
+                binding.into(),
+            ))
+            .unwrap();
+        let (_, extracted) = egraph.extract(value, &mut termdag, &sort).unwrap();
+        termdag.to_string(&extracted)
     }
 
     #[test]
-    fn prologue_matches_text_backend() {
-        let expected = crate::prologue_egglog_text();
-        let actual = crate::prologue();
+    fn schema_fragment_matches_schema_file_except_types_section() {
+        let expected = include_str!("../schema.egg");
+        let actual = super::schema::fragment();
+
+        let expected = strip_schema_types_section(expected);
+        let actual = strip_schema_types_section(&actual);
 
         let diff = if expected == actual {
             String::new()
         } else {
             similar::TextDiff::from_lines(&expected, &actual)
                 .unified_diff()
-                .header("prologue_egglog_text()", "eggplant_backend::prologue()")
+                .header("schema.egg (types stripped)", "schema::fragment() (types stripped)")
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn prologue_matches_text_backend_except_schema_types_section() {
+        let expected = crate::prologue_egglog_text();
+        let actual = crate::prologue();
+
+        let expected = strip_schema_types_section(&expected);
+        let actual = strip_schema_types_section(&actual);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "prologue_egglog_text() (types stripped)",
+                    "eggplant_backend::prologue() (types stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn prologue_is_semantically_equivalent_on_fixed_input() {
+        let expr = r#"(Const (Int 42) (Base (IntT)) (InFunc "DUMMY"))"#;
+
+        let expected = eval_and_extract_expr(&crate::prologue_egglog_text(), expr);
+        let actual = eval_and_extract_expr(&crate::prologue(), expr);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header("text backend extracted expr", "eggplant backend extracted expr")
                 .to_string()
         };
 
         insta::assert_snapshot!(diff, @"");
     }
 }
-

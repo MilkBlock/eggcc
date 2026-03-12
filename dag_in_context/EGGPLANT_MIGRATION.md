@@ -13,10 +13,10 @@
 
 ```bash
 # 旧后端（默认）
-cargo insta test --release --unreferenced=reject
+cd dag_in_context && cargo test
 
 # 新后端（eggplant feature）
-cargo insta test --release --unreferenced=reject --features eggplant
+cd dag_in_context && cargo test --features eggplant
 ```
 
 > 注意：本仓库需要系统依赖（README 提到的 LLVM 18、CBC）。未安装时可能出现 link 失败（例如 `CbcSolver`、`llvm-sys`）。
@@ -35,6 +35,63 @@ cargo insta test --release --unreferenced=reject --features eggplant
 - `.egg` 原文件保留不动，作为 reference 实现（便于 diff 与回归）。
 - 新后端只替换“拼接来源”，不要一次性改动多个 `.egg`。
 
+## Eggplant DSL 翻译模板（最小）
+
+迁移目标是把 `.egg` 的声明与规则翻译成 eggplant 的 Rust 形态（必要时允许混合 raw egglog 文本）。
+
+### `datatype` / `constructor` → `#[eggplant::dsl]`
+
+```rust
+#[eggplant::dsl]
+enum Expr {
+    Const { n: i64 },
+    Add { l: Expr, r: Expr },
+}
+```
+
+> 目前 `schema.egg` 的 Types 段已开始迁移：`src/eggplant_backend/schema_dsl.rs` 定义 DSL，`src/eggplant_backend/schema.rs` 负责注入到 `schema::fragment()` 中。
+
+### `function` → `#[eggplant::func]`
+
+```rust
+#[eggplant::func(output = i64, no_merge)]
+struct fib {
+    x: i64,
+}
+```
+
+若 `.egg` 里出现自定义 `:merge`（例如用 `old/new` 表达式实现 max/min），当前 eggplant 宏不一定支持：
+- 先把该声明保留为最小 raw egglog 文本
+- 同步记录到仓库根目录 `feature_request.md`
+
+### `rule` / `rewrite` → `MyTx::add_rule`
+
+```rust
+#[eggplant::pat_vars]
+struct ConstFoldAdd {
+    a: Const,
+    b: Const,
+    root: Add,
+}
+
+MyTx::add_rule(
+    "const_fold_add",
+    ruleset,
+    || {
+        let a = Const::query();
+        let b = Const::query();
+        let root = Add::query(&a, &b);
+        ConstFoldAdd::new(a, b, root)
+    },
+    |ctx, pat| {
+        let a = ctx.devalue(pat.a.n);
+        let b = ctx.devalue(pat.b.n);
+        let folded = ctx.insert_const(a + b);
+        ctx.union(pat.root, folded);
+    },
+);
+```
+
 ## 迁移顺序（按编译流程 / 现有 prologue 顺序）
 
 以 `prologue_egglog_text()` 的拼接顺序为准；当前顺序从：
@@ -52,6 +109,8 @@ cargo insta test --release --unreferenced=reject --features eggplant
 - 建议最小化：先对比 `prologue_egglog_text()` 与 `eggplant_backend::prologue()` 的差异（diff/snapshot），用于验证迁移的拼接正确性与“只改一个文件”原则。
 - 随迁移推进，再升级为更语义层的对比（例如固定输入程序的提取结果/关键 invariants）。
 
+当前已包含一个“固定输入 + 提取结果”的语义对比测试（在 `--features eggplant` 下运行），作为后续逐步替换文本 diff 的基础。
+
 ## Unsupported 语法/能力的处理
 
 遇到 eggplant/翻译技能暂不支持的语法或能力：
@@ -61,4 +120,3 @@ cargo insta test --release --unreferenced=reject --features eggplant
 3. 记录到仓库根目录的 `feature_request.md`
 
 从 `dag_in_context/` 目录写入时，路径为：`../feature_request.md`。
-

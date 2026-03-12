@@ -14,8 +14,8 @@ eggplant = ["dep:eggplant"]
 egglog = { git = "https://github.com/egraphs-good/egglog", rev = "161a36f" }
 eggplant = { version = "0.2.7", optional = true }
 smallvec = "1.11.1"
-strum = "0.25"
-strum_macros = "0.25"
+strum = "0.27.2"
+strum_macros = "0.27.2"
 main_error = "0.1.2"
 thiserror = "1.0"
 egraph-serialize = "0.2.0"

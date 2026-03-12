@@ -1,5 +1,5 @@
 pub(crate) fn fragment() -> String {
-    SCHEMA_EGGLOG.to_string()
+    inject_types_section(SCHEMA_EGGLOG, &super::schema_dsl::types_section())
 }
 
 const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
@@ -311,3 +311,41 @@ const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
 (let DUMMYCTX (InFunc "DUMMY"))
 
 (ruleset never)"#;
+
+fn inject_types_section(schema: &str, replacement: &str) -> String {
+    const TYPES_HEADER: &str = r#"; =================================
+; Types
+; =================================
+
+"#;
+    const ASSUMPTIONS_HEADER: &str = r#"; =================================
+; Assumptions
+; =================================
+
+"#;
+
+    let types_header_start = schema
+        .find(TYPES_HEADER)
+        .expect("schema.egg must contain the Types section header");
+    let types_body_start = types_header_start + TYPES_HEADER.len();
+    let assumptions_header_start = schema
+        .find(ASSUMPTIONS_HEADER)
+        .expect("schema.egg must contain the Assumptions section header");
+
+    assert!(
+        assumptions_header_start >= types_body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..types_body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[assumptions_header_start..]);
+    out
+}
