@@ -1,5 +1,6 @@
 pub(crate) fn fragment() -> String {
-    let schema = inject_types_section(SCHEMA_EGGLOG, &super::schema_dsl::types_section());
+    let schema = inject_list_expr_section(SCHEMA_EGGLOG, &super::schema_dsl::list_expr_section());
+    let schema = inject_types_section(&schema, &super::schema_dsl::types_section());
     let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
     let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
     inject_operators_section(&schema, &super::schema_dsl::operators_section())
@@ -314,6 +315,43 @@ const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
 (let DUMMYCTX (InFunc "DUMMY"))
 
 (ruleset never)"#;
+
+fn inject_list_expr_section(schema: &str, replacement: &str) -> String {
+    const LIST_EXPR_HEADER: &str = r#"; Used for constructing a list of branches for `Switch`es
+; or a list of functions in a `Program`.
+"#;
+    const TYPES_HEADER: &str = r#"; =================================
+; Types
+; =================================
+
+"#;
+
+    let header_start = schema
+        .find(LIST_EXPR_HEADER)
+        .expect("schema.egg must contain the ListExpr section header");
+    let body_start = header_start + LIST_EXPR_HEADER.len();
+    let types_header_start = schema[body_start..]
+        .find(TYPES_HEADER)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Types section header");
+
+    assert!(
+        types_header_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[types_header_start..]);
+    out
+}
 
 fn inject_types_section(schema: &str, replacement: &str) -> String {
     const TYPES_HEADER: &str = r#"; =================================

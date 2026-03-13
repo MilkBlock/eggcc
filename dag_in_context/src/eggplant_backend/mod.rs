@@ -53,6 +53,9 @@ pub(crate) fn prologue() -> String {
 #[cfg(test)]
 mod tests {
     fn strip_schema_generated_sections(program: &str) -> String {
+        const LIST_EXPR_HEADER: &str = r#"; Used for constructing a list of branches for `Switch`es
+; or a list of functions in a `Program`.
+"#;
         const TYPES_HEADER: &str = r#"; =================================
 ; Types
 ; =================================
@@ -95,7 +98,8 @@ mod tests {
             stripped
         }
 
-        let stripped = strip_section(program, TYPES_HEADER, ASSUMPTIONS_HEADER);
+        let stripped = strip_section(program, LIST_EXPR_HEADER, TYPES_HEADER);
+        let stripped = strip_section(&stripped, TYPES_HEADER, ASSUMPTIONS_HEADER);
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
         strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START)
@@ -167,7 +171,7 @@ mod tests {
 
     #[test]
     fn prologue_is_semantically_equivalent_on_fixed_input() {
-        let expr = r#"(Const (Int 42) (Base (IntT)) (InLoop (Arg (Base (StateT)) (InFunc "DUMMY")) (Empty (TupleT (TNil)) (InFunc "DUMMY"))))"#;
+        let expr = r#"(Switch (Const (Int 0) (Base (IntT)) (InFunc "DUMMY")) (Empty (TupleT (TNil)) (InFunc "DUMMY")) (Cons (Const (Int 42) (Base (IntT)) (InLoop (Arg (Base (StateT)) (InFunc "DUMMY")) (Empty (TupleT (TNil)) (InFunc "DUMMY")))) (Nil)))"#;
 
         let expected = eval_and_extract_expr(&crate::prologue_egglog_text(), expr);
         let actual = eval_and_extract_expr(&crate::prologue(), expr);
