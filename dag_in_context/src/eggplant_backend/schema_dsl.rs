@@ -31,10 +31,23 @@ enum Expr {
 
 #[eggplant::dsl(base = bool)]
 enum Assumption {
-    InFunc { name: String },
-    InLoop { input: Expr, pred_output: Expr },
-    InSwitch { branch: i64, pred: Expr, input: Expr },
-    InIf { pred_is_true: bool, pred: Expr, input: Expr },
+    InFunc {
+        name: String,
+    },
+    InLoop {
+        input: Expr,
+        pred_output: Expr,
+    },
+    InSwitch {
+        branch: i64,
+        pred: Expr,
+        input: Expr,
+    },
+    InIf {
+        pred_is_true: bool,
+        pred: Expr,
+        input: Expr,
+    },
 }
 
 #[eggplant::dsl(base = bool)]
