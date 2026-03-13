@@ -334,8 +334,7 @@ mod tests {
         let program = crate::ast::program_vec(main, vec![]);
 
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
-        let egglog_prog =
-            crate::build_program(&program, None, &program.fns(), &schedule, None, true);
+        let egglog_prog = crate::build_program(&program, None, &program.fns(), &schedule, None);
 
         let suffix_anchor = "(relation InlinedCall (String Expr))";
         let suffix_start = egglog_prog
