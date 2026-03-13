@@ -158,16 +158,20 @@ enum UnaryOp {
     Not {},
 }
 
-pub(crate) fn types_section() -> String {
-    datatypes_section(&["BaseType", "TypeList", "Type"])
-}
-
-pub(crate) fn operators_section() -> String {
-    datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
-}
-
 pub(crate) fn expr_section() -> String {
-    datatypes_section(&["Expr"])
+    // `Expr` constructors refer to schema datatypes that used to live in later
+    // raw sections, so emit the mutually-referential group together.
+    datatypes_section(&[
+        "BaseType",
+        "TypeList",
+        "Type",
+        "Assumption",
+        "Constant",
+        "TernaryOp",
+        "BinaryOp",
+        "UnaryOp",
+        "Expr",
+    ])
 }
 
 pub(crate) fn list_expr_section() -> String {
@@ -180,14 +184,6 @@ pub(crate) fn program_type_section() -> String {
 
 pub(crate) fn terms_section() -> String {
     datatypes_section(&["Term", "ListTerm"])
-}
-
-pub(crate) fn assumptions_section() -> String {
-    datatypes_section(&["Assumption"])
-}
-
-pub(crate) fn constants_section() -> String {
-    datatypes_section(&["Constant"])
 }
 
 fn datatypes_section(datatype_names: &[&str]) -> String {

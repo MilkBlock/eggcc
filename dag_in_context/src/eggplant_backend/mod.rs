@@ -225,6 +225,17 @@ mod tests {
     }
 
     #[test]
+    fn schema_fragment_parses_migrated_expr_constructor_with_dependent_sorts() {
+        let program = format!(
+            "{}\n(let __rlcr_expr (Arg (Base (IntT)) (InFunc \"DUMMY\")))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
