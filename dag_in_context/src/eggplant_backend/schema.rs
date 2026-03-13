@@ -6,6 +6,7 @@ pub(crate) fn fragment() -> String {
     let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
     let schema = remove_leaf_node_expr_constructors(&schema);
     let schema = inject_operators_section(&schema, &super::schema_dsl::operators_section());
+    let schema = remove_operator_expr_constructors(&schema);
     let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());
     inject_terms_section(&schema, &super::schema_dsl::terms_section())
 }
@@ -545,6 +546,23 @@ fn remove_leaf_node_expr_constructors(schema: &str) -> String {
             out = out.replacen(constructor, "", 1);
         } else {
             panic!("schema.egg must contain the leaf Expr constructor:\n{constructor}");
+        }
+    }
+
+    out
+}
+
+fn remove_operator_expr_constructors(schema: &str) -> String {
+    const TOP_CONSTRUCTOR: &str = "(constructor Top   (TernaryOp Expr Expr Expr) Expr)\n";
+    const BOP_CONSTRUCTOR: &str = "(constructor Bop   (BinaryOp Expr Expr) Expr)\n";
+    const UOP_CONSTRUCTOR: &str = "(constructor Uop   (UnaryOp Expr) Expr)\n";
+
+    let mut out = schema.to_owned();
+    for constructor in [TOP_CONSTRUCTOR, BOP_CONSTRUCTOR, UOP_CONSTRUCTOR] {
+        if out.contains(constructor) {
+            out = out.replacen(constructor, "", 1);
+        } else {
+            panic!("schema.egg must contain the operator Expr constructor:\n{constructor}");
         }
     }
 
