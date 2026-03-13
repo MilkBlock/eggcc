@@ -130,6 +130,10 @@ pub(crate) fn operators_section() -> String {
     datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
 }
 
+pub(crate) fn expr_section() -> String {
+    datatypes_section(&["Expr"])
+}
+
 pub(crate) fn list_expr_section() -> String {
     datatypes_section(&["ListExpr"])
 }
