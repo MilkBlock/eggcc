@@ -29,6 +29,12 @@ enum Expr {
     Opaque {},
 }
 
+#[eggplant::dsl]
+enum ListExpr {
+    Cons { head: Expr, tail: ListExpr },
+    Nil {},
+}
+
 #[eggplant::dsl(base = bool)]
 enum Assumption {
     InFunc {
@@ -111,6 +117,10 @@ pub(crate) fn types_section() -> String {
 
 pub(crate) fn operators_section() -> String {
     datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
+}
+
+pub(crate) fn list_expr_section() -> String {
+    datatypes_section(&["ListExpr"])
 }
 
 pub(crate) fn assumptions_section() -> String {
