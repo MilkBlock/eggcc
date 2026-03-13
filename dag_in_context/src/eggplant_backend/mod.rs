@@ -82,6 +82,11 @@ mod tests {
 "#;
         const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
 (constructor Top"#;
+        const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
+; Top-level expressions
+; =================================
+"#;
+        const FUNCTION_CONSTRUCTOR_START: &str = "(constructor Function";
         const TERMS_MARKER: &str = "; TERMS\n";
         const TERM_ASSUMPTION_TODO_COMMENT: &str =
             "; TODO: Will probably need ctx so that we can resubstitute?\n";
@@ -108,6 +113,11 @@ mod tests {
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
         let stripped = strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START);
+        let stripped = strip_section(
+            &stripped,
+            TOP_LEVEL_EXPRESSIONS_HEADER,
+            FUNCTION_CONSTRUCTOR_START,
+        );
         strip_section(&stripped, TERMS_MARKER, TERM_ASSUMPTION_TODO_COMMENT)
     }
 
@@ -153,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn schema_fragment_contains_generated_markers_for_expr_and_terms() {
+    fn schema_fragment_contains_generated_markers_for_expr_terms_and_program_type() {
         let schema = super::schema::fragment();
         let marker = "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
 
@@ -166,6 +176,12 @@ mod tests {
         assert!(
             schema.contains(&format!("; TERMS\n{marker}")),
             "schema::fragment() must inject the Terms datatypes from eggplant DSL"
+        );
+        assert!(
+            schema.contains(&format!(
+                "; =================================\n; Top-level expressions\n; =================================\n{marker}"
+            )),
+            "schema::fragment() must inject the ProgramType sort/constructor from eggplant DSL"
         );
     }
 
