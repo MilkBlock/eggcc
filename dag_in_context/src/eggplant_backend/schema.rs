@@ -5,6 +5,7 @@ pub(crate) fn fragment() -> String {
     let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
     let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
     let schema = inject_operators_section(&schema, &super::schema_dsl::operators_section());
+    let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());
     inject_terms_section(&schema, &super::schema_dsl::terms_section())
 }
 
@@ -529,6 +530,40 @@ fn inject_constants_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[constructor_comment_start..]);
+    out
+}
+
+fn inject_program_type_section(schema: &str, replacement: &str) -> String {
+    const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
+; Top-level expressions
+; =================================
+"#;
+    const FUNCTION_CONSTRUCTOR_START: &str = "(constructor Function";
+
+    let header_start = schema
+        .find(TOP_LEVEL_EXPRESSIONS_HEADER)
+        .expect("schema.egg must contain the Top-level expressions header");
+    let body_start = header_start + TOP_LEVEL_EXPRESSIONS_HEADER.len();
+    let function_constructor_start = schema[body_start..]
+        .find(FUNCTION_CONSTRUCTOR_START)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Function constructor");
+
+    assert!(
+        function_constructor_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[function_constructor_start..]);
     out
 }
 

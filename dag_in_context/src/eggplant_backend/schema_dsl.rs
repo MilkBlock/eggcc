@@ -46,6 +46,14 @@ enum ListTerm {
     TermNil {},
 }
 
+#[eggplant::dsl]
+enum ProgramType {
+    Program {
+        entry: Expr,
+        other_functions: ListExpr,
+    },
+}
+
 #[eggplant::dsl(base = bool)]
 enum Assumption {
     InFunc {
@@ -136,6 +144,10 @@ pub(crate) fn expr_section() -> String {
 
 pub(crate) fn list_expr_section() -> String {
     datatypes_section(&["ListExpr"])
+}
+
+pub(crate) fn program_type_section() -> String {
+    datatypes_section(&["ProgramType"])
 }
 
 pub(crate) fn terms_section() -> String {
