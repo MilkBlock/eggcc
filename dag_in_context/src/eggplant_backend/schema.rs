@@ -1,5 +1,6 @@
 pub(crate) fn fragment() -> String {
-    inject_types_section(SCHEMA_EGGLOG, &super::schema_dsl::types_section())
+    let schema = inject_types_section(SCHEMA_EGGLOG, &super::schema_dsl::types_section());
+    inject_operators_section(&schema, &super::schema_dsl::operators_section())
 }
 
 const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
@@ -347,5 +348,41 @@ fn inject_types_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[assumptions_header_start..]);
+    out
+}
+
+fn inject_operators_section(schema: &str, replacement: &str) -> String {
+    const OPERATORS_HEADER: &str = r#"; =================================
+; Operators
+; =================================
+
+"#;
+    const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
+(constructor Top"#;
+
+    let header_start = schema
+        .find(OPERATORS_HEADER)
+        .expect("schema.egg must contain the Operators section header");
+    let body_start = header_start + OPERATORS_HEADER.len();
+    let constructors_start = schema[body_start..]
+        .find(OPERATORS_CONSTRUCTORS_START)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Operators constructors section");
+
+    assert!(
+        constructors_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[constructors_start..]);
     out
 }

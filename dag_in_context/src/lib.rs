@@ -43,24 +43,24 @@ pub mod typechecker;
 pub mod util;
 pub(crate) mod utility;
 use main_error::MainError;
+#[cfg(feature = "eggplant")]
+mod eggplant_backend;
 pub mod extractiongymfastergreedydag;
 pub mod fastercbcextractor;
 pub mod pretty_print;
 pub mod schedule;
-#[cfg(feature = "eggplant")]
-mod eggplant_backend;
 
 pub type Result = std::result::Result<(), MainError>;
 
 pub fn prologue() -> String {
     #[cfg(feature = "eggplant")]
     {
-        return eggplant_backend::prologue();
+        eggplant_backend::prologue()
     }
 
     #[cfg(not(feature = "eggplant"))]
     {
-        return prologue_egglog_text();
+        prologue_egglog_text()
     }
 }
 

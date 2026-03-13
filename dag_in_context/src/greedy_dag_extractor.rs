@@ -560,7 +560,7 @@ impl<'a> Extractor<'a> {
                 } else if head.to_string() == "Single" {
                     Some(vec![self.termdag.get(children[0]).clone()])
                 } else {
-                    return None;
+                    None
                 }
             }
             Term::Lit(_) => None,
@@ -1105,22 +1105,23 @@ pub fn extract_with_paths(
 
                 let sort_of_node = info.get_sort_of_eclass(&classid);
                 // if node is effectful, we only consider it if it is in the effectful path
-                if sort_of_node == "Expr" && effectful_paths.is_some() {
-                    let effectful_lookup = extractor.is_eclass_effectful(classid.clone());
-                    if effectful_lookup.is_none() && node.op != "Function" {
-                        // skip when type is unknown
-                        continue;
-                    }
-                    if let Some(true) = effectful_lookup {
-                        let effectful_nodes = effectful_paths.unwrap().get(&rootid);
-                        if effectful_nodes.is_none() {
-                            // continue when this root isn't in effectful_paths
+                if sort_of_node == "Expr" {
+                    if let Some(effectful_paths) = effectful_paths {
+                        let effectful_lookup = extractor.is_eclass_effectful(classid.clone());
+                        if effectful_lookup.is_none() && node.op != "Function" {
+                            // skip when type is unknown
                             continue;
                         }
+                        if let Some(true) = effectful_lookup {
+                            let Some(effectful_nodes) = effectful_paths.get(&rootid) else {
+                                // continue when this root isn't in effectful_paths
+                                continue;
+                            };
 
-                        // skip nodes not on the path
-                        if !effectful_nodes.unwrap().contains(&nodeid) {
-                            continue;
+                            // skip nodes not on the path
+                            if !effectful_nodes.contains(&nodeid) {
+                                continue;
+                            }
                         }
                     }
                 }
@@ -1201,8 +1202,10 @@ pub trait CostModel {
 }
 
 pub struct DefaultCostModel;
+#[cfg(test)]
 pub struct TestCostModel;
 
+#[cfg(test)]
 impl CostModel for TestCostModel {
     fn get_op_cost(&self, op: &str) -> Cost {
         match op {

@@ -232,18 +232,20 @@ impl SimpleCfgFunction {
                 None
             };
             // single outgoing edge
-            if target.is_some() && node_mapping.contains_key(&target.unwrap()) {
-                let next = target.unwrap();
-                let new_target = node_mapping[&next];
-                // this node will be mapped to the previous
-                node_mapping.insert(node, new_target);
+            if let Some(next) = target {
+                if let Some(&new_target) = node_mapping.get(&next) {
+                    // this node will be mapped to the previous
+                    node_mapping.insert(node, new_target);
 
-                // add instructions to the beginning of the next node
-                let mut new_instrs = self.graph[node].instrs.to_vec();
-                new_instrs.extend(resulting_graph[new_target].instrs.to_vec());
+                    // add instructions to the beginning of the next node
+                    let mut new_instrs = self.graph[node].instrs.to_vec();
+                    new_instrs.extend(resulting_graph[new_target].instrs.to_vec());
 
-                resulting_graph[new_target].instrs = new_instrs;
-            } else {
+                    resulting_graph[new_target].instrs = new_instrs;
+                    continue;
+                }
+            }
+            {
                 // add the node
                 let new_node = resulting_graph.add_node(self.graph[node].clone());
                 node_mapping.insert(node, new_node);
