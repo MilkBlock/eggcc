@@ -35,6 +35,17 @@ enum ListExpr {
     Nil {},
 }
 
+#[eggplant::dsl]
+enum Term {
+    OpaqueTerm {},
+}
+
+#[eggplant::dsl]
+enum ListTerm {
+    TermCons { head: Term, tail: ListTerm },
+    TermNil {},
+}
+
 #[eggplant::dsl(base = bool)]
 enum Assumption {
     InFunc {
@@ -121,6 +132,10 @@ pub(crate) fn operators_section() -> String {
 
 pub(crate) fn list_expr_section() -> String {
     datatypes_section(&["ListExpr"])
+}
+
+pub(crate) fn terms_section() -> String {
+    datatypes_section(&["Term", "ListTerm"])
 }
 
 pub(crate) fn assumptions_section() -> String {

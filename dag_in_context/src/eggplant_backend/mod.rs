@@ -81,6 +81,9 @@ mod tests {
 "#;
         const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
 (constructor Top"#;
+        const TERMS_MARKER: &str = "; TERMS\n";
+        const TERM_ASSUMPTION_TODO_COMMENT: &str =
+            "; TODO: Will probably need ctx so that we can resubstitute?\n";
 
         fn strip_section(program: &str, header: &str, next: &str) -> String {
             let header_start = program
@@ -102,7 +105,8 @@ mod tests {
         let stripped = strip_section(&stripped, TYPES_HEADER, ASSUMPTIONS_HEADER);
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
-        strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START)
+        let stripped = strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START);
+        strip_section(&stripped, TERMS_MARKER, TERM_ASSUMPTION_TODO_COMMENT)
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -192,6 +196,28 @@ mod tests {
     }
 
     #[test]
+    fn prologue_is_semantically_equivalent_on_terms_fixed_input() {
+        let list_term = r#"(TermCons (TermArg) (TermNil))"#;
+
+        let expected = eval_and_extract_expr(&crate::prologue_egglog_text(), list_term);
+        let actual = eval_and_extract_expr(&crate::prologue(), list_term);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "text backend extracted term",
+                    "eggplant backend extracted term",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
     fn prologue_is_semantically_equivalent_on_tiny_program() {
         fn run_and_extract(program: &crate::schema::TreeProgram, egglog_program: &str) -> String {
             let mut egraph = egglog::EGraph::default();
@@ -237,10 +263,10 @@ mod tests {
         let egglog_prog =
             crate::build_program(&program, None, &program.fns(), &schedule, None, true);
 
-        let suffix_marker = "; required by function_inlining_unoins";
+        let suffix_anchor = "(relation InlinedCall (String Expr))";
         let suffix_start = egglog_prog
-            .find(suffix_marker)
-            .expect("build_program output must contain the expected prologue boundary marker");
+            .find(suffix_anchor)
+            .expect("build_program output must contain the InlinedCall relation (used as the prologue boundary for this test)");
         let suffix = &egglog_prog[suffix_start..];
 
         let expected_program_egglog = format!(
