@@ -51,59 +51,55 @@ pub(crate) fn prologue() -> String {
 }
 
 #[cfg(test)]
-    mod tests {
-        fn strip_schema_generated_sections(program: &str) -> String {
-            const TYPES_HEADER: &str = r#"; =================================
+mod tests {
+    fn strip_schema_generated_sections(program: &str) -> String {
+        const TYPES_HEADER: &str = r#"; =================================
 ; Types
 ; =================================
 
 "#;
-            const ASSUMPTIONS_HEADER: &str = r#"; =================================
+        const ASSUMPTIONS_HEADER: &str = r#"; =================================
 ; Assumptions
 ; =================================
 
 "#;
-            const LEAF_NODES_HEADER: &str = r#"; =================================
+        const LEAF_NODES_HEADER: &str = r#"; =================================
 ; Leaf nodes
 ; Constants, argument, and empty tuple
 ; =================================
 
 "#;
-            const CONSTANTS_MARKER: &str = "; Constants\n";
-            const CONST_CONSTRUCTOR_COMMENT: &str = "; All leaf nodes need the type of the argument\n";
-            const OPERATORS_HEADER: &str = r#"; =================================
+        const CONSTANTS_MARKER: &str = "; Constants\n";
+        const CONST_CONSTRUCTOR_COMMENT: &str = "; All leaf nodes need the type of the argument\n";
+        const OPERATORS_HEADER: &str = r#"; =================================
 ; Operators
 ; =================================
 
 "#;
-            const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
+        const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
 (constructor Top"#;
 
-            fn strip_section(program: &str, header: &str, next: &str) -> String {
-                let header_start = program
-                    .find(header)
-                    .unwrap_or_else(|| panic!("schema.egg must contain the section header:\n{header}"));
-                let body_start = header_start + header.len();
-                let next_start = program[body_start..]
-                    .find(next)
-                    .map(|idx| idx + body_start)
-                    .unwrap_or_else(|| panic!("schema.egg must contain the section boundary:\n{next}"));
+        fn strip_section(program: &str, header: &str, next: &str) -> String {
+            let header_start = program
+                .find(header)
+                .unwrap_or_else(|| panic!("schema.egg must contain the section header:\n{header}"));
+            let body_start = header_start + header.len();
+            let next_start = program[body_start..]
+                .find(next)
+                .map(|idx| idx + body_start)
+                .unwrap_or_else(|| panic!("schema.egg must contain the section boundary:\n{next}"));
 
-                let mut stripped = String::new();
-                stripped.push_str(&program[..body_start]);
-                stripped.push_str(&program[next_start..]);
-                stripped
-            }
-
-            let stripped = strip_section(program, TYPES_HEADER, ASSUMPTIONS_HEADER);
-            let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
-            let stripped = strip_section(
-                &stripped,
-                CONSTANTS_MARKER,
-                CONST_CONSTRUCTOR_COMMENT,
-            );
-            strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START)
+            let mut stripped = String::new();
+            stripped.push_str(&program[..body_start]);
+            stripped.push_str(&program[next_start..]);
+            stripped
         }
+
+        let stripped = strip_section(program, TYPES_HEADER, ASSUMPTIONS_HEADER);
+        let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
+        let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
+        strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START)
+    }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
         let binding = "__rlcr_expr";
