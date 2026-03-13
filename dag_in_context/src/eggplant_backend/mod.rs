@@ -88,11 +88,7 @@ mod tests {
         }
 
         let stripped = strip_section(program, TYPES_HEADER, ASSUMPTIONS_HEADER);
-        strip_section(
-            &stripped,
-            OPERATORS_HEADER,
-            OPERATORS_CONSTRUCTORS_START,
-        )
+        strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START)
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -187,7 +183,8 @@ mod tests {
             let mut egraph = egglog::EGraph::default();
             egraph.parse_and_run_program(None, egglog_program).unwrap();
 
-            let (serialized, unextractables) = crate::greedy_dag_extractor::serialized_egraph(egraph);
+            let (serialized, unextractables) =
+                crate::greedy_dag_extractor::serialized_egraph(egraph);
 
             let mut termdag = egglog::TermDag::default();
             let extracted = crate::greedy_dag_extractor::greedy_dag_extract(
@@ -213,11 +210,9 @@ mod tests {
         );
         let program = crate::ast::program_vec(main, vec![]);
 
-        let schedule = format!(
-            "(run-schedule {})",
-            crate::schedule::types_and_indexing()
-        );
-        let egglog_prog = crate::build_program(&program, None, &program.fns(), &schedule, None, true);
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let egglog_prog =
+            crate::build_program(&program, None, &program.fns(), &schedule, None, true);
 
         let suffix_marker = "; required by function_inlining_unoins";
         let suffix_start = egglog_prog
@@ -230,8 +225,7 @@ mod tests {
             crate::prologue_egglog_text(),
             suffix
         );
-        let actual_program_egglog =
-            format!("\n; Prologue\n{}\n\n{}", crate::prologue(), suffix);
+        let actual_program_egglog = format!("\n; Prologue\n{}\n\n{}", crate::prologue(), suffix);
 
         let expected = run_and_extract(&program, &expected_program_egglog);
         let actual = run_and_extract(&program, &actual_program_egglog);
@@ -241,7 +235,10 @@ mod tests {
         } else {
             similar::TextDiff::from_lines(&expected, &actual)
                 .unified_diff()
-                .header("text backend extracted program", "eggplant backend extracted program")
+                .header(
+                    "text backend extracted program",
+                    "eggplant backend extracted program",
+                )
                 .to_string()
         };
 

@@ -91,8 +91,7 @@ fn datatypes_section(datatype_names: &[&str]) -> String {
         })
         .unwrap_or_default();
 
-    datatypes
-        .retain(|(_, name, _)| datatype_names.iter().any(|keep| name.as_str() == *keep));
+    datatypes.retain(|(_, name, _)| datatype_names.iter().any(|keep| name.as_str() == *keep));
     datatypes.sort_by(|a, b| a.1.cmp(&b.1));
 
     if datatypes.is_empty() {
