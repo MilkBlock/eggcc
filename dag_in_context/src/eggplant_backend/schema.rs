@@ -4,6 +4,7 @@ pub(crate) fn fragment() -> String {
     let schema = inject_types_section(&schema, &super::schema_dsl::types_section());
     let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
     let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
+    let schema = remove_leaf_node_expr_constructors(&schema);
     let schema = inject_operators_section(&schema, &super::schema_dsl::operators_section());
     let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());
     inject_terms_section(&schema, &super::schema_dsl::terms_section())
@@ -530,6 +531,23 @@ fn inject_constants_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[constructor_comment_start..]);
+    out
+}
+
+fn remove_leaf_node_expr_constructors(schema: &str) -> String {
+    const ARG_CONSTRUCTOR: &str = "(constructor Arg (Type Assumption) Expr)\n";
+    const CONST_CONSTRUCTOR: &str = "(constructor Const (Constant Type Assumption) Expr)\n";
+    const EMPTY_CONSTRUCTOR: &str = "(constructor Empty (Type Assumption) Expr)\n";
+
+    let mut out = schema.to_owned();
+    for constructor in [ARG_CONSTRUCTOR, CONST_CONSTRUCTOR, EMPTY_CONSTRUCTOR] {
+        if out.contains(constructor) {
+            out = out.replacen(constructor, "", 1);
+        } else {
+            panic!("schema.egg must contain the leaf Expr constructor:\n{constructor}");
+        }
+    }
+
     out
 }
 

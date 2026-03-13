@@ -118,7 +118,12 @@ mod tests {
             TOP_LEVEL_EXPRESSIONS_HEADER,
             FUNCTION_CONSTRUCTOR_START,
         );
-        strip_section(&stripped, TERMS_MARKER, TERM_ASSUMPTION_TODO_COMMENT)
+        let stripped = strip_section(&stripped, TERMS_MARKER, TERM_ASSUMPTION_TODO_COMMENT);
+
+        stripped
+            .replace("(constructor Arg (Type Assumption) Expr)\n", "")
+            .replace("(constructor Const (Constant Type Assumption) Expr)\n", "")
+            .replace("(constructor Empty (Type Assumption) Expr)\n", "")
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
