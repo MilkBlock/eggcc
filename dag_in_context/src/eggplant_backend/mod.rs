@@ -53,6 +53,7 @@ pub(crate) fn prologue() -> String {
 #[cfg(test)]
 mod tests {
     fn strip_schema_generated_sections(program: &str) -> String {
+        const EXPR_DECL_HEADER: &str = "; Every term is an `Expr` or a `ListExpr`.\n";
         const LIST_EXPR_HEADER: &str = r#"; Used for constructing a list of branches for `Switch`es
 ; or a list of functions in a `Program`.
 "#;
@@ -101,7 +102,8 @@ mod tests {
             stripped
         }
 
-        let stripped = strip_section(program, LIST_EXPR_HEADER, TYPES_HEADER);
+        let stripped = strip_section(program, EXPR_DECL_HEADER, LIST_EXPR_HEADER);
+        let stripped = strip_section(&stripped, LIST_EXPR_HEADER, TYPES_HEADER);
         let stripped = strip_section(&stripped, TYPES_HEADER, ASSUMPTIONS_HEADER);
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
@@ -148,6 +150,23 @@ mod tests {
         };
 
         insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn schema_fragment_contains_generated_markers_for_expr_and_terms() {
+        let schema = super::schema::fragment();
+        let marker = "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
+
+        assert!(
+            schema.contains(&format!(
+                "; Every term is an `Expr` or a `ListExpr`.\n{marker}"
+            )),
+            "schema::fragment() must inject the Expr datatype from eggplant DSL"
+        );
+        assert!(
+            schema.contains(&format!("; TERMS\n{marker}")),
+            "schema::fragment() must inject the Terms datatypes from eggplant DSL"
+        );
     }
 
     #[test]
