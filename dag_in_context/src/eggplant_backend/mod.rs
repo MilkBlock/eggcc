@@ -52,7 +52,7 @@ pub(crate) fn prologue() -> String {
 
 #[cfg(test)]
 mod tests {
-    fn strip_schema_types_section(program: &str) -> String {
+    fn strip_schema_generated_sections(program: &str) -> String {
         const TYPES_HEADER: &str = r#"; =================================
 ; Types
 ; =================================
@@ -63,19 +63,36 @@ mod tests {
 ; =================================
 
 "#;
+        const OPERATORS_HEADER: &str = r#"; =================================
+; Operators
+; =================================
 
-        let types_header_start = program
-            .find(TYPES_HEADER)
-            .expect("schema.egg must contain the Types section header");
-        let types_body_start = types_header_start + TYPES_HEADER.len();
-        let assumptions_header_start = program
-            .find(ASSUMPTIONS_HEADER)
-            .expect("schema.egg must contain the Assumptions section header");
+"#;
+        const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
+(constructor Top"#;
 
-        let mut stripped = String::new();
-        stripped.push_str(&program[..types_body_start]);
-        stripped.push_str(&program[assumptions_header_start..]);
-        stripped
+        fn strip_section(program: &str, header: &str, next: &str) -> String {
+            let header_start = program
+                .find(header)
+                .unwrap_or_else(|| panic!("schema.egg must contain the section header:\n{header}"));
+            let body_start = header_start + header.len();
+            let next_start = program[body_start..]
+                .find(next)
+                .map(|idx| idx + body_start)
+                .unwrap_or_else(|| panic!("schema.egg must contain the section boundary:\n{next}"));
+
+            let mut stripped = String::new();
+            stripped.push_str(&program[..body_start]);
+            stripped.push_str(&program[next_start..]);
+            stripped
+        }
+
+        let stripped = strip_section(program, TYPES_HEADER, ASSUMPTIONS_HEADER);
+        strip_section(
+            &stripped,
+            OPERATORS_HEADER,
+            OPERATORS_CONSTRUCTORS_START,
+        )
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -97,32 +114,12 @@ mod tests {
     }
 
     #[test]
-    fn schema_fragment_matches_schema_file_except_types_section() {
+    fn schema_fragment_matches_schema_file_except_generated_sections() {
         let expected = include_str!("../schema.egg");
         let actual = super::schema::fragment();
 
-        let expected = strip_schema_types_section(expected);
-        let actual = strip_schema_types_section(&actual);
-
-        let diff = if expected == actual {
-            String::new()
-        } else {
-            similar::TextDiff::from_lines(&expected, &actual)
-                .unified_diff()
-                .header("schema.egg (types stripped)", "schema::fragment() (types stripped)")
-                .to_string()
-        };
-
-        insta::assert_snapshot!(diff, @"");
-    }
-
-    #[test]
-    fn prologue_matches_text_backend_except_schema_types_section() {
-        let expected = crate::prologue_egglog_text();
-        let actual = crate::prologue();
-
-        let expected = strip_schema_types_section(&expected);
-        let actual = strip_schema_types_section(&actual);
+        let expected = strip_schema_generated_sections(expected);
+        let actual = strip_schema_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
@@ -130,8 +127,31 @@ mod tests {
             similar::TextDiff::from_lines(&expected, &actual)
                 .unified_diff()
                 .header(
-                    "prologue_egglog_text() (types stripped)",
-                    "eggplant_backend::prologue() (types stripped)",
+                    "schema.egg (generated sections stripped)",
+                    "schema::fragment() (generated sections stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn prologue_matches_text_backend_except_generated_schema_sections() {
+        let expected = crate::prologue_egglog_text();
+        let actual = crate::prologue();
+
+        let expected = strip_schema_generated_sections(&expected);
+        let actual = strip_schema_generated_sections(&actual);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "prologue_egglog_text() (generated sections stripped)",
+                    "eggplant_backend::prologue() (generated sections stripped)",
                 )
                 .to_string()
         };
@@ -151,7 +171,77 @@ mod tests {
         } else {
             similar::TextDiff::from_lines(&expected, &actual)
                 .unified_diff()
-                .header("text backend extracted expr", "eggplant backend extracted expr")
+                .header(
+                    "text backend extracted expr",
+                    "eggplant backend extracted expr",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn prologue_is_semantically_equivalent_on_tiny_program() {
+        fn run_and_extract(program: &crate::schema::TreeProgram, egglog_program: &str) -> String {
+            let mut egraph = egglog::EGraph::default();
+            egraph.parse_and_run_program(None, egglog_program).unwrap();
+
+            let (serialized, unextractables) = crate::greedy_dag_extractor::serialized_egraph(egraph);
+
+            let mut termdag = egglog::TermDag::default();
+            let extracted = crate::greedy_dag_extractor::greedy_dag_extract(
+                program,
+                program.fns(),
+                serialized,
+                unextractables,
+                &mut termdag,
+                crate::greedy_dag_extractor::DefaultCostModel,
+                true,
+                false,
+            )
+            .1;
+
+            extracted.add_dummy_ctx().0.to_string()
+        }
+
+        let main = crate::ast::function(
+            "main",
+            crate::ast::base(crate::ast::intt()),
+            crate::ast::base(crate::ast::intt()),
+            crate::ast::add(crate::ast::iarg(), crate::ast::int(1)),
+        );
+        let program = crate::ast::program_vec(main, vec![]);
+
+        let schedule = format!(
+            "(run-schedule {})",
+            crate::schedule::types_and_indexing()
+        );
+        let egglog_prog = crate::build_program(&program, None, &program.fns(), &schedule, None, true);
+
+        let suffix_marker = "; required by function_inlining_unoins";
+        let suffix_start = egglog_prog
+            .find(suffix_marker)
+            .expect("build_program output must contain the expected prologue boundary marker");
+        let suffix = &egglog_prog[suffix_start..];
+
+        let expected_program_egglog = format!(
+            "\n; Prologue\n{}\n\n{}",
+            crate::prologue_egglog_text(),
+            suffix
+        );
+        let actual_program_egglog =
+            format!("\n; Prologue\n{}\n\n{}", crate::prologue(), suffix);
+
+        let expected = run_and_extract(&program, &expected_program_egglog);
+        let actual = run_and_extract(&program, &actual_program_egglog);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header("text backend extracted program", "eggplant backend extracted program")
                 .to_string()
         };
 

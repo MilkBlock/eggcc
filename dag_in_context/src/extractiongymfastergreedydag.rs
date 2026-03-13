@@ -130,8 +130,8 @@ impl FasterGreedyDagExtractor {
             if node.children.iter().all(|c| costs.contains_key(n2c(c))) {
                 let lookup = costs.get(class_id);
                 let mut prev_cost = NotNan::new(f64::INFINITY).unwrap();
-                if lookup.is_some() {
-                    prev_cost = lookup.unwrap().total;
+                if let Some(lookup) = lookup {
+                    prev_cost = lookup.total;
                 }
 
                 let cost_set = Self::calculate_cost_set(egraph, node_id.clone(), &costs, prev_cost);

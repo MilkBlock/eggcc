@@ -667,8 +667,6 @@ dependencies = [
 [[package]]
 name = "eggplant-macros"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "670c89010c51c1f1f12188f54f99cb4705f26a83e90b6bdfd94021c282d5d054"
 dependencies = [
  "darling",
  "eggplant-transpiler",

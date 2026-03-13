@@ -984,7 +984,7 @@ fn reachable(
             let class_vars = vars.get(class).unwrap();
             for kids in &class_vars.childrens_classes {
                 for child_class in kids {
-                    reachable(vars, &[child_class.clone()], is_reachable);
+                    reachable(vars, std::slice::from_ref(child_class), is_reachable);
                 }
             }
         }

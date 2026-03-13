@@ -41,3 +41,6 @@ libc = "0.2"
 
 [dev-dependencies]
 similar = "2.7.0"
+
+[patch.crates-io]
+eggplant-macros = { path = "vendor/eggplant-macros" }
