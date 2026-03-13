@@ -167,7 +167,20 @@ pub(crate) fn operators_section() -> String {
 }
 
 pub(crate) fn expr_section() -> String {
-    datatypes_section(&["Expr"])
+    // `Expr` references several other datatypes (Type/Assumption/Constant/Ops).
+    // Emit them in the same `(datatypes ...)` block so egglog can resolve the
+    // mutual/cyclic references without relying on section order in `schema.egg`.
+    datatypes_section(&[
+        "BaseType",
+        "TypeList",
+        "Type",
+        "Assumption",
+        "Constant",
+        "TernaryOp",
+        "BinaryOp",
+        "UnaryOp",
+        "Expr",
+    ])
 }
 
 pub(crate) fn list_expr_section() -> String {
