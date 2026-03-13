@@ -1,5 +1,7 @@
 pub(crate) fn fragment() -> String {
     let schema = inject_types_section(SCHEMA_EGGLOG, &super::schema_dsl::types_section());
+    let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
+    let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
     inject_operators_section(&schema, &super::schema_dsl::operators_section())
 }
 
@@ -384,5 +386,75 @@ fn inject_operators_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[constructors_start..]);
+    out
+}
+
+fn inject_assumptions_section(schema: &str, replacement: &str) -> String {
+    const ASSUMPTIONS_HEADER: &str = r#"; =================================
+; Assumptions
+; =================================
+
+"#;
+    const LEAF_NODES_HEADER: &str = r#"; =================================
+; Leaf nodes
+; Constants, argument, and empty tuple
+; =================================
+
+"#;
+
+    let assumptions_header_start = schema
+        .find(ASSUMPTIONS_HEADER)
+        .expect("schema.egg must contain the Assumptions section header");
+    let assumptions_body_start = assumptions_header_start + ASSUMPTIONS_HEADER.len();
+    let leaf_nodes_header_start = schema
+        .find(LEAF_NODES_HEADER)
+        .expect("schema.egg must contain the Leaf nodes section header");
+
+    assert!(
+        leaf_nodes_header_start >= assumptions_body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..assumptions_body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[leaf_nodes_header_start..]);
+    out
+}
+
+fn inject_constants_section(schema: &str, replacement: &str) -> String {
+    const CONSTANTS_MARKER: &str = "; Constants\n";
+    const CONST_CONSTRUCTOR_COMMENT: &str = "; All leaf nodes need the type of the argument\n";
+
+    let marker_start = schema
+        .find(CONSTANTS_MARKER)
+        .expect("schema.egg must contain the Constants marker");
+    let body_start = marker_start + CONSTANTS_MARKER.len();
+    let constructor_comment_start = schema[body_start..]
+        .find(CONST_CONSTRUCTOR_COMMENT)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Constant section boundary comment");
+
+    assert!(
+        constructor_comment_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n");
+    }
+
+    out.push_str(&schema[constructor_comment_start..]);
     out
 }

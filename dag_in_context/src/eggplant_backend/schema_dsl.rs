@@ -25,6 +25,26 @@ enum Type {
 }
 
 #[eggplant::dsl]
+enum Expr {
+    Opaque {},
+}
+
+#[eggplant::dsl(base = bool)]
+enum Assumption {
+    InFunc { name: String },
+    InLoop { input: Expr, pred_output: Expr },
+    InSwitch { branch: i64, pred: Expr, input: Expr },
+    InIf { pred_is_true: bool, pred: Expr, input: Expr },
+}
+
+#[eggplant::dsl(base = bool)]
+enum Constant {
+    Int { value: i64 },
+    Bool { value: bool },
+    Float { value: f64 },
+}
+
+#[eggplant::dsl]
 enum TernaryOp {
     Write {},
     Select {},
@@ -78,6 +98,14 @@ pub(crate) fn types_section() -> String {
 
 pub(crate) fn operators_section() -> String {
     datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
+}
+
+pub(crate) fn assumptions_section() -> String {
+    datatypes_section(&["Assumption"])
+}
+
+pub(crate) fn constants_section() -> String {
+    datatypes_section(&["Constant"])
 }
 
 fn datatypes_section(datatype_names: &[&str]) -> String {
