@@ -26,7 +26,6 @@ enum Type {
 
 #[eggplant::dsl]
 enum Expr {
-    Opaque {},
     Arg {
         ty: Type,
         assumption: Assumption,
@@ -65,6 +64,9 @@ enum ListExpr {
 
 #[eggplant::dsl]
 enum Term {
+    // Placeholder constructor required by `#[eggplant::dsl]` (empty enums are unsupported).
+    // Assign an extremely high extraction cost so it is never chosen by extractors.
+    #[cost(1000000)]
     OpaqueTerm {},
 }
 
@@ -158,14 +160,6 @@ enum UnaryOp {
     Not {},
 }
 
-pub(crate) fn types_section() -> String {
-    datatypes_section(&["BaseType", "TypeList", "Type"])
-}
-
-pub(crate) fn operators_section() -> String {
-    datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
-}
-
 pub(crate) fn expr_section() -> String {
     // `Expr` references several other datatypes (Type/Assumption/Constant/Ops).
     // Emit them in the same `(datatypes ...)` block so egglog can resolve the
@@ -193,14 +187,6 @@ pub(crate) fn program_type_section() -> String {
 
 pub(crate) fn terms_section() -> String {
     datatypes_section(&["Term", "ListTerm"])
-}
-
-pub(crate) fn assumptions_section() -> String {
-    datatypes_section(&["Assumption"])
-}
-
-pub(crate) fn constants_section() -> String {
-    datatypes_section(&["Constant"])
 }
 
 fn datatypes_section(datatype_names: &[&str]) -> String {

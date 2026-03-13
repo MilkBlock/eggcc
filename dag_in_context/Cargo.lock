@@ -366,6 +366,7 @@ dependencies = [
  "graphviz-rust 0.8.0",
  "indexmap",
  "insta",
+ "libc",
  "log",
  "main_error",
  "ordered-float 3.9.2",
