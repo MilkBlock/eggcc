@@ -204,9 +204,18 @@ mod tests {
 
         let main = crate::ast::function(
             "main",
-            crate::ast::base(crate::ast::intt()),
-            crate::ast::base(crate::ast::intt()),
-            crate::ast::add(crate::ast::iarg(), crate::ast::int(1)),
+            crate::ast::tuplet_vec(vec![crate::ast::intt(), crate::ast::statet()]),
+            crate::ast::tuplet_vec(vec![crate::ast::intt(), crate::ast::statet()]),
+            {
+                let arg = crate::ast::arg_ty(crate::ast::tuplet_vec(vec![
+                    crate::ast::intt(),
+                    crate::ast::statet(),
+                ]));
+                crate::ast::parallel_vec(vec![
+                    crate::ast::add(crate::ast::first(arg.clone()), crate::ast::int(1)),
+                    crate::ast::second(arg),
+                ])
+            },
         );
         let program = crate::ast::program_vec(main, vec![]);
 
