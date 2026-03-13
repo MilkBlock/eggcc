@@ -27,6 +27,19 @@ enum Type {
 #[eggplant::dsl]
 enum Expr {
     Opaque {},
+    Arg {
+        ty: Type,
+        assumption: Assumption,
+    },
+    Const {
+        constant: Constant,
+        ty: Type,
+        assumption: Assumption,
+    },
+    Empty {
+        ty: Type,
+        assumption: Assumption,
+    },
 }
 
 #[eggplant::dsl]
