@@ -80,8 +80,7 @@ mod tests {
 ; =================================
 
 "#;
-        const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
-(constructor Top"#;
+        const OPERATORS_CONSTRUCTORS_START: &str = "(constructor Get";
         const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
 ; Top-level expressions
 ; =================================
