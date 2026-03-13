@@ -190,7 +190,7 @@ where
         .map_err(|_| std::io::Error::other("failed to join stderr reader"))??;
 
     #[cfg(all(unix, not(target_os = "macos")))]
-    if let Some(limit_bytes) = memory_limit_bytes {
+    if let Some(limit_bytes) = _memory_limit_bytes {
         if let Some(signal) = status.signal() {
             if matches!(signal, libc::SIGKILL | libc::SIGABRT) {
                 return Err(std::io::Error::other(MemoryLimitExceeded::new(
