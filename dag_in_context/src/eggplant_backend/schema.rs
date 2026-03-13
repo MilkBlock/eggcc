@@ -3,7 +3,8 @@ pub(crate) fn fragment() -> String {
     let schema = inject_types_section(&schema, &super::schema_dsl::types_section());
     let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
     let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
-    inject_operators_section(&schema, &super::schema_dsl::operators_section())
+    let schema = inject_operators_section(&schema, &super::schema_dsl::operators_section());
+    inject_terms_section(&schema, &super::schema_dsl::terms_section())
 }
 
 const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
@@ -494,5 +495,37 @@ fn inject_constants_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[constructor_comment_start..]);
+    out
+}
+
+fn inject_terms_section(schema: &str, replacement: &str) -> String {
+    const TERMS_MARKER: &str = "; TERMS\n";
+    const TERM_ASSUMPTION_TODO_COMMENT: &str =
+        "; TODO: Will probably need ctx so that we can resubstitute?\n";
+
+    let marker_start = schema
+        .find(TERMS_MARKER)
+        .expect("schema.egg must contain the Terms marker");
+    let body_start = marker_start + TERMS_MARKER.len();
+    let todo_comment_start = schema[body_start..]
+        .find(TERM_ASSUMPTION_TODO_COMMENT)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Terms section boundary comment");
+
+    assert!(
+        todo_comment_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[todo_comment_start..]);
     out
 }
