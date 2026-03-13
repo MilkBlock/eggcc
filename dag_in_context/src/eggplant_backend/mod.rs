@@ -124,6 +124,9 @@ mod tests {
             .replace("(constructor Arg (Type Assumption) Expr)\n", "")
             .replace("(constructor Const (Constant Type Assumption) Expr)\n", "")
             .replace("(constructor Empty (Type Assumption) Expr)\n", "")
+            .replace("(constructor Top   (TernaryOp Expr Expr Expr) Expr)\n", "")
+            .replace("(constructor Bop   (BinaryOp Expr Expr) Expr)\n", "")
+            .replace("(constructor Uop   (UnaryOp Expr) Expr)\n", "")
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -188,6 +191,38 @@ mod tests {
             )),
             "schema::fragment() must inject the ProgramType sort/constructor from eggplant DSL"
         );
+    }
+
+    #[test]
+    fn injected_expr_section_contains_migrated_constructors() {
+        const EXPR_DECL_HEADER: &str = "; Every term is an `Expr` or a `ListExpr`.\n";
+        const LIST_EXPR_HEADER: &str = r#"; Used for constructing a list of branches for `Switch`es
+; or a list of functions in a `Program`.
+"#;
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
+
+        let schema = super::schema::fragment();
+        let expr_block_start = schema
+            .find(EXPR_DECL_HEADER)
+            .expect("schema::fragment() must contain the Expr declaration header")
+            + EXPR_DECL_HEADER.len();
+        let expr_block_end = schema
+            .find(LIST_EXPR_HEADER)
+            .expect("schema::fragment() must contain the ListExpr section header");
+        let expr_block = &schema[expr_block_start..expr_block_end];
+
+        assert!(
+            expr_block.contains(GENERATED_MARKER),
+            "Expr section must be generated from eggplant DSL"
+        );
+
+        for constructor in ["(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop"] {
+            assert!(
+                expr_block.contains(constructor),
+                "Injected Expr section must contain {constructor}"
+            );
+        }
     }
 
     #[test]

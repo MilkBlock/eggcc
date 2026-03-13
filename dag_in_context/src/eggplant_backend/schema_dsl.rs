@@ -40,6 +40,21 @@ enum Expr {
         ty: Type,
         assumption: Assumption,
     },
+    Top {
+        op: TernaryOp,
+        a: Expr,
+        b: Expr,
+        c: Expr,
+    },
+    Bop {
+        op: BinaryOp,
+        lhs: Expr,
+        rhs: Expr,
+    },
+    Uop {
+        op: UnaryOp,
+        expr: Expr,
+    },
 }
 
 #[eggplant::dsl]
