@@ -140,7 +140,8 @@ mod tests {
         const RAW_START: &str = "(ruleset type-analysis)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Propagate arg types up\n";
+        const END_MARKER: &str =
+            "; Don't push arg types through Program, Function, DoWhile, Let exprs because\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -426,7 +427,8 @@ mod tests {
     fn type_analysis_fragment_contains_generated_declaration_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Propagate arg types up\n";
+        const END_MARKER: &str =
+            "; Don't push arg types through Program, Function, DoWhile, Let exprs because\n";
 
         let fragment = super::type_analysis::fragment();
         let generated_end = fragment
@@ -448,6 +450,8 @@ mod tests {
             "(relation HasType",
             "(relation ExpectType",
             "(relation HasArgType",
+            "(rule ((= lhs (Uop _ e))",
+            "(rule ((= lhs (DoWhile ins body))",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -460,6 +464,19 @@ mod tests {
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_has_arg_type_propagation_rules() {
+        let expr = "(Uop (Neg) (Arg (Base (IntT)) (InFunc \"DUMMY\")))";
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n{schedule}\n(check (HasArgType __rlcr_expr (Base (IntT))))\n",
             crate::prologue()
         );
 

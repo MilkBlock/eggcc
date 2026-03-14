@@ -7,8 +7,9 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const PROPAGATE_ARG_TYPES_COMMENT: &str = "; Propagate arg types up\n";
-const HELPER_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
+const DONT_PUSH_ARG_TYPES_THROUGH_NEW_CONTEXTS_COMMENT: &str =
+    "; Don't push arg types through Program, Function, DoWhile, Let exprs because\n";
+const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
          :ruleset type-helpers)
@@ -69,11 +70,97 @@ const HELPER_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :rule
        (!= ty ty2))
       ((panic "arg type mismatch in function"))
       :ruleset error-checking)
+
+; Propagate arg types up
+(rule ((= lhs (Uop _ e))
+       (HasArgType e ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Bop _ a b))
+       (HasArgType a ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Bop _ a b))
+       (HasArgType b ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Top _ a b c))
+       (HasArgType a ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Top _ a b c))
+       (HasArgType b ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Top _ a b c))
+       (HasArgType c ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Get e _))
+       (HasArgType e ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Alloc _id e state _))
+       (HasArgType e ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Call _ e))
+       (HasArgType e ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Single e))
+       (HasArgType e ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Concat e1 e2))
+       (HasArgType e1 ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Concat e1 e2))
+       (HasArgType e2 ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Switch pred inputs (Cons branch rest)))
+       (HasArgType pred ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Switch pred inputs (Cons branch rest)))
+       (HasArgType branch ty)
+       (HasType inputs ty2)
+       (!= ty ty2))
+      ((panic "switch branches then branch has incorrect input type"))
+      :ruleset error-checking)
+;; demand with one fewer branches
+(rule ((= lhs (Switch pred inputs (Cons branch rest))))
+      ((Switch pred inputs rest))
+      :ruleset type-analysis)
+(rule ((= lhs (If c i t e))
+       (HasArgType c ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (If c i t e))
+       (HasType i ty)
+       (HasArgType t ty2)
+       (!= ty ty2))
+      ((panic "if branches then branch has incorrect input type"))
+      :ruleset error-checking)
+(rule ((= lhs (If c i t e))
+       (HasType i ty)
+       (HasArgType e ty2)
+       (!= ty ty2))
+      ((panic "if branches else branch has incorrect input type"))
+      :ruleset error-checking)
+
+
+(rule ((= lhs (DoWhile ins body))
+       (HasArgType ins ty))
+      ((HasArgType lhs ty))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
-    // Start the type_analysis migration with the declaration-only prefix, while
-    // keeping the rule bodies in raw egglog until later rounds.
+    // Grow the generated type_analysis prefix one self-contained chunk at a time,
+    // while leaving the remaining raw egglog text below a stable anchor.
     [
         Command::AddRuleset("type-analysis".into()),
         Command::AddRuleset("type-helpers".into()),
@@ -103,7 +190,7 @@ fn generated_declarations_section() -> String {
     .collect::<Vec<_>>()
     .join("\n")
         + "\n"
-        + HELPER_RULES_AND_RELATIONS
+        + GENERATED_PREFIX_RULES_AND_RELATIONS
 }
 
 fn schema(inputs: &[&str], output: &str) -> Schema {
@@ -115,8 +202,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(PROPAGATE_ARG_TYPES_COMMENT)
-        .expect("type_analysis.egg must contain the arg-type propagation anchor");
+        .find(DONT_PUSH_ARG_TYPES_THROUGH_NEW_CONTEXTS_COMMENT)
+        .expect("type_analysis.egg must contain the arg-type propagation boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
