@@ -1,12 +1,14 @@
 use egglog::ast::{Command, Schema, Span};
 
 pub(crate) fn fragment() -> String {
-    inject_generated_prefix(UTILITY_EGGLOG, &generated_declarations_section())
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(&generated_declarations_section());
+    out.push('\n');
+    out
 }
 
-const UTILITY_EGGLOG: &str = include_str!("../utility/util.egg");
 const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-const TEMPORARY_CONTEXT_COMMENT: &str = ";; A temporary context.\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"
 (rule ((Switch pred inputs branch)) ((union (ListExpr-suffix branch 0) branch)) :ruleset always-run)
 
@@ -131,6 +133,27 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"
 (rule ((= lhs (DoWhile a b)))
       ((Not-Just-Concat lhs))
       :ruleset always-run)
+
+
+;; A temporary context.
+;; Be sure to delete at the end of all actions or else!!!
+;; This is safer than using a persistant context, since we may miss an important part of the query.
+(rule ((TmpCtx))
+  ((panic "TmpCtx should not exist outside rule body"))
+  :ruleset always-run)
+
+
+(ruleset subsume-after-helpers)
+;; After running the `saturating` ruleset, these if statements can be subsumed
+(relation ToSubsumeIf (Expr Expr Expr Expr))
+;; Workaround of https://github.com/egraphs-good/egglog/issues/462
+;; Make sure the if we are subsuming is present
+(rule ((ToSubsumeIf a b c d)
+       (If a b c d))
+      ((subsume (If a b c d)))
+      :ruleset subsume-after-helpers)
+
+(ruleset add-to-debug-expr)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -170,6 +193,13 @@ fn generated_declarations_section() -> String {
             schema: schema(&["Expr"], "i64"),
             merge: None,
         },
+        Command::Constructor {
+            span: Span::Panic,
+            name: "TmpCtx".into(),
+            schema: schema(&[], "Assumption"),
+            cost: None,
+            unextractable: false,
+        },
     ]
     .into_iter()
     .map(|command| command.to_string())
@@ -184,17 +214,4 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
         input: inputs.iter().map(|sort| (*sort).into()).collect(),
         output: output.into(),
     }
-}
-
-fn inject_generated_prefix(utility: &str, replacement: &str) -> String {
-    let raw_start = utility
-        .find(TEMPORARY_CONTEXT_COMMENT)
-        .expect("utility/util.egg must contain the temporary-context boundary anchor");
-
-    let mut out = String::new();
-    out.push_str(GENERATED_MARKER);
-    out.push_str(replacement);
-    out.push_str("\n\n");
-    out.push_str(&utility[raw_start..]);
-    out
 }

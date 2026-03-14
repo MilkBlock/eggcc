@@ -162,16 +162,12 @@ mod tests {
         const RAW_START: &str = "(function ListExpr-length (ListExpr) i64 :no-merge)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-        const END_MARKER: &str = ";; A temporary context.\n";
 
         let start = program
             .find(GENERATED_MARKER)
             .or_else(|| program.find(RAW_START))
             .expect("util.egg fragment must contain the generated marker or raw start");
-        let end = program[start..]
-            .find(END_MARKER)
-            .map(|idx| idx + start)
-            .expect("util.egg fragment must contain the leading-expressions boundary anchor");
+        let end = program.len();
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -538,13 +534,9 @@ mod tests {
     fn util_fragment_contains_generated_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-        const END_MARKER: &str = ";; A temporary context.\n";
 
         let fragment = super::util::fragment();
-        let generated_end = fragment
-            .find(END_MARKER)
-            .expect("util::fragment() must retain the leading-expressions boundary anchor");
-        let generated_prefix = &fragment[..generated_end];
+        let generated_prefix = fragment.as_str();
 
         assert!(
             generated_prefix.contains(GENERATED_MARKER),
@@ -562,6 +554,10 @@ mod tests {
             "(relation Add-Gets",
             "(relation Not-Just-Concat",
             "(relation Add-All-Gets",
+            "(constructor TmpCtx",
+            "(ruleset subsume-after-helpers)",
+            "(relation ToSubsumeIf",
+            "(ruleset add-to-debug-expr)",
             ":no-merge",
             ":unextractable",
             "(union (ListExpr-suffix branch 0) branch)",
@@ -580,6 +576,8 @@ mod tests {
             "(Add-All-Gets orig something n 0)",
             "(union (Get orig (+ offset pos)) (Get something pos))",
             "(Not-Just-Concat lhs)",
+            "(panic \"TmpCtx should not exist outside rule body\")",
+            "(subsume (If a b c d))",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -751,6 +749,48 @@ mod tests {
 
         let mut egraph = egglog::EGraph::default();
         egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_util_tmp_ctx_rules() {
+        let tuple_ty = "(TupleT (TCons (IntT) (TCons (IntT) (TNil))))";
+        let inputs = "(Concat (Single (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))) (Single (Const (Int 9) (Base (StateT)) (InFunc \"DUMMY\"))))";
+        let body = format!(
+            "(Concat (Single (Const (Bool true) {tuple_ty} (TmpCtx))) (Arg {tuple_ty} (TmpCtx)))"
+        );
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let program = format!(
+            "{}\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_loop (DoWhile __rlcr_inputs __rlcr_body))\n(union (TmpCtx) (InLoop __rlcr_inputs __rlcr_body))\n(delete (TmpCtx))\n{schedule}\n(check (= (Get __rlcr_inputs 0) (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))))\n(check (= (Get __rlcr_inputs 1) (Const (Int 9) (Base (StateT)) (InFunc \"DUMMY\"))))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_util_subsume_after_helpers_rules() {
+        let cond = "(Const (Bool true) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let inputs = "(Empty (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let then_branch = "(Const (Int 1) (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let else_branch = "(Const (Int 2) (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let if_expr = format!("(If {cond} {inputs} {then_branch} {else_branch})");
+        let program = format!(
+            "{}\n(let __rlcr_if {if_expr})\n(ToSubsumeIf {cond} {inputs} {then_branch} {else_branch})\n(run-schedule subsume-after-helpers)\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+
+        let (serialized, _) = crate::greedy_dag_extractor::serialized_egraph(egraph);
+        assert!(
+            serialized
+                .nodes
+                .values()
+                .any(|node| node.op == "If" && node.subsumed),
+            "subsume-after-helpers should mark the target If node as subsumed"
+        );
     }
 
     #[test]
