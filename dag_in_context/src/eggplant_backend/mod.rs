@@ -96,7 +96,7 @@ mod tests {
 "#;
         const FUNCTION_HAS_TYPE_RELATION: &str = "(relation FunctionHasType";
         const TERMS_MARKER: &str = "; TERMS\n";
-        const TERM_OPERATORS_HEADER: &str = "; Term Operators\n";
+        const TUPLE_OPERATORS_HEADER: &str = "; Tuple Operators\n";
 
         fn strip_section(program: &str, header: &str, next: &str) -> String {
             let header_start = program
@@ -127,7 +127,7 @@ mod tests {
             TOP_LEVEL_EXPRESSIONS_HEADER,
             FUNCTION_HAS_TYPE_RELATION,
         );
-        let stripped = strip_section(&stripped, TERMS_MARKER, TERM_OPERATORS_HEADER);
+        let stripped = strip_section(&stripped, TERMS_MARKER, TUPLE_OPERATORS_HEADER);
 
         stripped
             .replace("(constructor Arg (Type Assumption) Expr)\n", "")
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn injected_terms_section_contains_migrated_constructors() {
         const TERMS_MARKER: &str = "; TERMS\n";
-        const TERM_OPERATORS_HEADER: &str = "; Term Operators\n";
+        const TUPLE_OPERATORS_HEADER: &str = "; Tuple Operators\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
 
@@ -260,8 +260,8 @@ mod tests {
             .expect("schema::fragment() must contain the Terms marker")
             + TERMS_MARKER.len();
         let terms_block_end = schema
-            .find(TERM_OPERATORS_HEADER)
-            .expect("schema::fragment() must contain the Term Operators header");
+            .find(TUPLE_OPERATORS_HEADER)
+            .expect("schema::fragment() must contain the Tuple Operators header");
         let terms_block = &schema[terms_block_start..terms_block_end];
 
         assert!(
@@ -269,7 +269,17 @@ mod tests {
             "Terms section must be generated from eggplant DSL"
         );
 
-        for constructor in ["(TermArg", "(TermConst", "(TermEmpty"] {
+        for constructor in [
+            "(TermArg",
+            "(TermConst",
+            "(TermEmpty",
+            "(TermTop",
+            "(TermBop",
+            "(TermUop",
+            "(TermGet",
+            "(TermAlloc",
+            "(TermCall",
+        ] {
             assert!(
                 terms_block.contains(constructor),
                 "Injected Terms section must contain {constructor}"
@@ -336,6 +346,17 @@ mod tests {
     fn schema_fragment_parses_migrated_term_leaf_constructors() {
         let program = format!(
             "{}\n(let __rlcr_term (TermCons (TermConst (Int 1)) (TermCons (TermEmpty) (TermCons (TermArg) (TermNil)))))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_term_operator_constructors() {
+        let program = format!(
+            "{}\n(let __rlcr_term (TermCall \"callee\" (TermGet (TermAlloc 0 (TermConst (Int 4)) (TermArg) (IntT)) 0)))\n",
             super::schema::fragment()
         );
 

@@ -109,8 +109,39 @@ enum ListExpr {
 enum Term {
     OpaqueTerm {},
     TermArg {},
-    TermConst { constant: Constant },
+    TermConst {
+        constant: Constant,
+    },
     TermEmpty {},
+    TermTop {
+        op: TernaryOp,
+        a: Term,
+        b: Term,
+        c: Term,
+    },
+    TermBop {
+        op: BinaryOp,
+        lhs: Term,
+        rhs: Term,
+    },
+    TermUop {
+        op: UnaryOp,
+        expr: Term,
+    },
+    TermGet {
+        term: Term,
+        index: i64,
+    },
+    TermAlloc {
+        id: i64,
+        amount: Term,
+        state_edge: Term,
+        pointer_ty: BaseType,
+    },
+    TermCall {
+        name: String,
+        arg: Term,
+    },
 }
 
 #[eggplant::dsl]
