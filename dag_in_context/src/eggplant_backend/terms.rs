@@ -1,10 +1,12 @@
 pub(crate) fn fragment() -> String {
-    inject_generated_prefix(TERMS_EGGLOG, GENERATED_PREFIX)
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(GENERATED_PREFIX);
+    out.push('\n');
+    out
 }
 
-const TERMS_EGGLOG: &str = include_str!("../utility/terms.egg");
 const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
-const NODE_SORT: &str = "(sort Node)\n";
 const GENERATED_PREFIX: &str = r#"(ruleset terms)
 ;; helpers keeps track of the new best extracted terms
 (ruleset terms-helpers)
@@ -141,17 +143,9 @@ const GENERATED_PREFIX: &str = r#"(ruleset terms)
 ;       ; cost of if is 10 + cost of pred + cost of input + max of branch costs
 ;       ((PotentialExtractedExpr lhs (TCPair (TermIf t1 t2 t3 t4) (+ 10 (+ (+ c1 c2) (max c3 c4))))))
 ;       :ruleset terms)
+
+(sort Node)
+;; store a particular if node for later
+;; stored as the if eclass, pred, inputs, then, else
+(constructor IfNode (Expr Expr Expr Expr Expr) Node)
 "#;
-
-fn inject_generated_prefix(terms: &str, replacement: &str) -> String {
-    let raw_start = terms
-        .find(NODE_SORT)
-        .expect("utility/terms.egg must contain the node-sort boundary anchor");
-
-    let mut out = String::new();
-    out.push_str(GENERATED_MARKER);
-    out.push_str(replacement);
-    out.push_str("\n\n");
-    out.push_str(&terms[raw_start..]);
-    out
-}

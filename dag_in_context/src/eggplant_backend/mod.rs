@@ -181,23 +181,13 @@ mod tests {
     }
 
     fn strip_terms_generated_sections(program: &str) -> String {
-        const RAW_START: &str = "(ruleset terms)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
-        const END_MARKER: &str = "(sort Node)\n";
 
-        let start = program
-            .find(GENERATED_MARKER)
-            .or_else(|| program.find(RAW_START))
-            .expect("terms.egg fragment must contain the generated marker or raw start");
-        let end = program[start..]
-            .find(END_MARKER)
-            .map(|idx| idx + start)
-            .expect("terms.egg fragment must contain the node-sort boundary anchor");
-
-        let mut stripped = String::new();
-        stripped.push_str(&program[..start]);
-        stripped.push_str(&program[end..]);
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
         stripped
     }
 
@@ -634,11 +624,13 @@ mod tests {
 
     #[test]
     fn terms_fragment_matches_terms_file_except_generated_sections() {
-        let expected = include_str!("../utility/terms.egg");
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
+
+        let expected = include_str!("../utility/terms.egg").trim_end().to_string();
         let actual = super::terms::fragment();
 
-        let expected = strip_terms_generated_sections(expected);
-        let actual = strip_terms_generated_sections(&actual);
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
 
         let diff = if expected == actual {
             String::new()
@@ -659,13 +651,9 @@ mod tests {
     fn terms_fragment_contains_generated_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
-        const END_MARKER: &str = "(sort Node)\n";
 
         let fragment = super::terms::fragment();
-        let generated_end = fragment
-            .find(END_MARKER)
-            .expect("terms::fragment() must retain the node-sort boundary anchor");
-        let generated_prefix = &fragment[..generated_end];
+        let generated_prefix = fragment.as_str();
 
         assert!(
             generated_prefix.contains(GENERATED_MARKER),
@@ -695,6 +683,8 @@ mod tests {
             "(TermGet t1 i)",
             "(TermSingle t1)",
             "(TermConcat t1 t2)",
+            "(sort Node)",
+            "(constructor IfNode",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -919,6 +909,24 @@ mod tests {
             "(run-schedule (saturate terms (saturate terms-helpers (saturate terms-helpers-helpers))))";
         let program = format!(
             "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (= (ExtractedExpr __rlcr_expr) (TCPair (TermConcat (TermSingle (TermConst (Int 7))) (TermSingle (TermConst (Bool true)))) 2)))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_terms_if_node_tail() {
+        let cond = "(Const (Bool true) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let inputs = "(Empty (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let then_branch = "(Const (Int 1) (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let else_branch = "(Const (Int 2) (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let if_expr = format!("(If {cond} {inputs} {then_branch} {else_branch})");
+        let schedule =
+            "(run-schedule (saturate terms (saturate terms-helpers (saturate terms-helpers-helpers))))";
+        let program = format!(
+            "{}\n(let __rlcr_if {if_expr})\n(let __rlcr_if_node (IfNode __rlcr_if {cond} {inputs} {then_branch} {else_branch}))\n{schedule}\n(check (= __rlcr_if_node (IfNode __rlcr_if {cond} {inputs} {then_branch} {else_branch})))\n",
             crate::prologue()
         );
 
