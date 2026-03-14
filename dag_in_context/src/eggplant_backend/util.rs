@@ -6,8 +6,7 @@ pub(crate) fn fragment() -> String {
 
 const UTILITY_EGGLOG: &str = include_str!("../utility/util.egg");
 const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-const LEADING_EXPRESSIONS_COMMENT: &str =
-    ";; Leading expressions are tuples that are used as a whole\n";
+const TEMPORARY_CONTEXT_COMMENT: &str = ";; A temporary context.\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"
 (rule ((Switch pred inputs branch)) ((union (ListExpr-suffix branch 0) branch)) :ruleset always-run)
 
@@ -28,6 +27,110 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"
 (rule ((HasType expr (TupleT tl))
        (= len (TypeList-length tl)))
       ((set (tuple-length expr) len)) :ruleset always-run)
+
+
+;; Leading expressions are tuples that are used as a whole
+;; during optimization and are matched in the query.
+(relation leading-Expr (Expr))
+(relation leading-Expr-list (ListExpr))
+
+(rule ((= e (DoWhile inputs pred_out)))
+      ((leading-Expr e)
+       (leading-Expr inputs)
+       (leading-Expr pred_out))
+      :ruleset always-run)
+(rule ((= e (If cond inputs thn els)))
+       ((leading-Expr e)
+        (leading-Expr inputs)
+        (leading-Expr thn)
+        (leading-Expr els))
+       :ruleset always-run)
+(rule ((= e (Switch pred inputs branch)))
+      ((leading-Expr e)
+       (leading-Expr-list branch)
+       (leading-Expr inputs))
+       :ruleset always-run)
+(rule ((leading-Expr-list (Cons hd tl)))
+      ((leading-Expr hd)
+       (leading-Expr-list tl))
+      :ruleset always-run)
+(rule ((= e (Arg t a)))
+      ((leading-Expr e))
+      :ruleset always-run)
+
+;; Create a Get for everything that is a leading expression, so not everything needs a Get node
+(rule ((Single expr)) ((union (Get (Single expr) 0) expr)) :ruleset always-run)
+;; initial get
+(rule ((leading-Expr tuple)
+       (> (tuple-length tuple) 0))
+      ((Get tuple 0))
+      :ruleset always-run)
+;; next get
+(rule ((leading-Expr tuple)
+       (= len (tuple-length tuple))
+       (= ith (Get tuple i))
+       (< (+ i 1) len)
+       )
+       ((Get tuple (+ 1 i)))
+       :ruleset always-run)
+
+;; push Get through Concat in a way that isn't quadratic
+;; add-gets to      original-expr   current-expr    start-index
+(relation Add-Gets (Expr            Expr            i64))
+(rule ((Get x i))
+      ((Add-Gets x x 0))
+      :ruleset always-run)
+(rule ((Add-Gets orig (Concat left right) n)
+       (= len (tuple-length left)))
+      ((Add-Gets orig left n)
+       (Add-Gets orig right (+ n len)))
+      :ruleset always-run)
+
+(rule ((Add-Gets orig (Single e) n))
+      ((union (Get orig n) e))
+      :ruleset always-run)
+
+;; now, for things other than Concat we Add-All-Gets
+;; put things here (potentially tuples) that are not
+;; just an eclass with a Concat
+(relation Not-Just-Concat (Expr))
+;; original-expr, current-expr, offset, current-pos
+(relation Add-All-Gets (Expr Expr i64 i64))
+(rule ((Add-Gets orig something n)
+       (Not-Just-Concat something))
+      ((Add-All-Gets orig something n 0))
+      :ruleset always-run)
+
+(rule ((Add-All-Gets orig something offset pos)
+       (< pos (tuple-length something)))
+      ((union (Get orig (+ offset pos)) (Get something pos))
+       (Add-All-Gets orig something offset (+ pos 1)))
+      :ruleset always-run)
+
+(rule ((= lhs (Arg a b)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (Top a b c d)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (Bop a b c)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (Call a b)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (Uop a b)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (Switch a b c)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (If a b c d)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
+(rule ((= lhs (DoWhile a b)))
+      ((Not-Just-Concat lhs))
+      :ruleset always-run)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -85,8 +188,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(utility: &str, replacement: &str) -> String {
     let raw_start = utility
-        .find(LEADING_EXPRESSIONS_COMMENT)
-        .expect("utility/util.egg must contain the leading-expressions boundary anchor");
+        .find(TEMPORARY_CONTEXT_COMMENT)
+        .expect("utility/util.egg must contain the temporary-context boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);

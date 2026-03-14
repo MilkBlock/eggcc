@@ -162,7 +162,7 @@ mod tests {
         const RAW_START: &str = "(function ListExpr-length (ListExpr) i64 :no-merge)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-        const END_MARKER: &str = ";; Leading expressions are tuples that are used as a whole\n";
+        const END_MARKER: &str = ";; A temporary context.\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -538,7 +538,7 @@ mod tests {
     fn util_fragment_contains_generated_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
-        const END_MARKER: &str = ";; Leading expressions are tuples that are used as a whole\n";
+        const END_MARKER: &str = ";; A temporary context.\n";
 
         let fragment = super::util::fragment();
         let generated_end = fragment
@@ -557,12 +557,29 @@ mod tests {
             "(constructor ListExpr-suffix",
             "(constructor Append",
             "(function tuple-length",
+            "(relation leading-Expr",
+            "(relation leading-Expr-list",
+            "(relation Add-Gets",
+            "(relation Not-Just-Concat",
+            "(relation Add-All-Gets",
+            ":no-merge",
+            ":unextractable",
             "(union (ListExpr-suffix branch 0) branch)",
             "(union (ListExpr-ith top n) hd)",
             "(set (ListExpr-length list) n)",
             "(rewrite (Append (Cons a b) e)",
             "(rewrite (Append (Nil) e)",
             "(set (tuple-length expr) len)",
+            "(leading-Expr inputs)",
+            "(leading-Expr-list branch)",
+            "(union (Get (Single expr) 0) expr)",
+            "(Get tuple 0)",
+            "(Get tuple (+ 1 i))",
+            "(Add-Gets orig right (+ n len))",
+            "(union (Get orig n) e)",
+            "(Add-All-Gets orig something n 0)",
+            "(union (Get orig (+ offset pos)) (Get something pos))",
+            "(Not-Just-Concat lhs)",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -710,6 +727,25 @@ mod tests {
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
             "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (= (tuple-length __rlcr_expr) 2))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_util_leading_get_rules() {
+        let tuple_ty = "(TupleT (TCons (IntT) (TCons (BoolT) (TNil))))";
+        let cond = "(Const (Bool true) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let left = "(Single (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let right = "(Single (Const (Bool false) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let inputs = format!("(Concat {left} {right})");
+        let then_branch = format!("(Const (Int 1) {tuple_ty} (InFunc \"DUMMY\"))");
+        let else_branch = format!("(Const (Int 2) {tuple_ty} (InFunc \"DUMMY\"))");
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let program = format!(
+            "{}\n(let __rlcr_inputs {inputs})\n(let __rlcr_if (If {cond} __rlcr_inputs {then_branch} {else_branch}))\n{schedule}\n(check (= (Get __rlcr_inputs 0) (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))))\n(check (= (Get __rlcr_inputs 1) (Const (Bool false) (Base (StateT)) (InFunc \"DUMMY\"))))\n",
             crate::prologue()
         );
 
