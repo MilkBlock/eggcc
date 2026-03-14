@@ -4,6 +4,7 @@ mod context_of;
 mod purity_analysis;
 mod schema;
 mod schema_dsl;
+mod subst;
 mod term_subst;
 mod terms;
 mod type_analysis;
@@ -29,7 +30,7 @@ pub(crate) fn prologue() -> String {
         &context_prop::fragment(),
         &term_subst::fragment(),
         &context_of::fragment(),
-        include_str!("../utility/subst.egg"),
+        &subst::fragment(),
         include_str!("../utility/canonicalize.egg"),
         include_str!("../utility/expr_size.egg"),
         include_str!("../utility/drop_at.egg"),
@@ -278,6 +279,28 @@ mod tests {
         const SECTION_HEADER: &str = "; We only have context for Exprs, not ListExprs.\n";
         const NEXT_SECTION_HEADER: &str =
             ";; Substitution rules allow for substituting some new expression for the argument\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_subst_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
+        const SECTION_HEADER: &str =
+            ";; Substitution rules allow for substituting some new expression for the argument\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset canon)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -1086,6 +1109,78 @@ mod tests {
     }
 
     #[test]
+    fn subst_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
+
+        let expected = include_str!("../utility/subst.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::subst::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/subst.egg (generated marker stripped)",
+                    "subst::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn subst_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
+
+        let fragment = super::subst::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "subst::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset subst)",
+            "(ruleset apply-subst-unions)",
+            "(constructor Subst",
+            "(constructor IfSubst",
+            "(If (Const (Bool true) ty ctx)",
+            "(constructor DelayedSubstUnion",
+            "(HasArgType lhs ty)",
+            "(panic \"Substitution type mismatch!",
+            "(DelayedSubstUnion lhs (AddContext assum to))",
+            "(Const c newty assum)",
+            "(Empty newty assum)",
+            "(Top op (Subst assum to c1)",
+            "(Bop op (Subst assum to c1)",
+            "(Uop op (Subst assum to c1))",
+            "(Get (Subst assum to c1) index)",
+            "(Alloc id (Subst assum to c1)",
+            "(Call name (Subst assum to c1))",
+            "(Single (Subst assum to c1))",
+            "(Concat (Subst assum to c1)",
+            "(Switch (Subst assum to pred)",
+            "(If (Subst assum to pred)",
+            "(DoWhile (Subst assum to in)",
+            "(Function name inty outty (Subst assum to body))",
+            "(union lhs rhs)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated subst fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -1385,6 +1480,21 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_subst_rules() {
+        let to = "(Const (Int 3) (Base (IntT)) (InFunc \"RLCR\"))";
+        let input = "(Arg (Base (IntT)) (InFunc \"OLD\"))";
+        let expected = "(If (Const (Bool true) (Base (IntT)) (InFunc \"RLCR\")) (Const (Int 3) (Base (IntT)) (InFunc \"RLCR\")) (Arg (Base (IntT)) (InFunc \"OLD\")) (Arg (Base (IntT)) (InFunc \"OLD\")))";
+        let program = format!(
+            "{}\n(let __rlcr_to {to})\n(let __rlcr_in {input})\n(let __rlcr_subst (IfSubst __rlcr_to __rlcr_in))\n(run-schedule {})\n(run-schedule (saturate subst))\n(check (= __rlcr_subst {expected}))\n",
+            crate::prologue(),
+            crate::schedule::types_and_indexing()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -1407,6 +1517,8 @@ mod tests {
         let actual = strip_term_subst_generated_sections(&actual);
         let expected = strip_context_of_generated_sections(&expected);
         let actual = strip_context_of_generated_sections(&actual);
+        let expected = strip_subst_generated_sections(&expected);
+        let actual = strip_subst_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

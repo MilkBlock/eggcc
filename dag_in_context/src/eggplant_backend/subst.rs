@@ -1,0 +1,213 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(SUBST);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
+const SUBST: &str = r#";; Substitution rules allow for substituting some new expression for the argument
+;; in some new context.
+;; It performs the substitution, copying over the equalities from the original eclass.
+;; It only places context on the leaf nodes.
+
+(ruleset subst)
+(ruleset apply-subst-unions)
+
+;; (Subst assumption to in) substitutes `to` for `(Arg ty)` in `in`.
+;; It also replaces the leaf context in `to` with `assumption` using `AddContext`.
+;; `assumption` *justifies* this substitution, as the context that the result is used in.
+;; In other words, it must refine the equivalence relation of `in` with `to` as the argument.
+(constructor Subst (Assumption Expr Expr) Expr :unextractable)
+
+
+;; Use an if statement with a true boolean to substitute `to` for `in`.
+;; This is used when substitution can't be used due to
+;; the weak linearity constraint.
+(constructor IfSubst (Expr Expr) Expr)
+
+(rule ((= lhs (IfSubst to in))
+       (HasArgType to ty)
+       (ContextOf to ctx))
+      ((union lhs
+         (If (Const (Bool true) ty ctx)
+           to
+           in
+           in)))
+       :ruleset subst)
+
+
+;; Used to delay unions for the subst ruleset.
+;; This is necessary because substitution may not terminate if it can
+;; observe its own results- it may create infinitly large terms.
+;; Instead, we phase substitution by delaying resulting unions in this table.
+;; After applying this table, substitutions and this table are cleared.
+(constructor DelayedSubstUnion (Expr Expr) Expr :unextractable)
+
+;; add a type rule to get the arg type of a substitution
+;; this enables nested substitutions
+(rule ((= lhs (Subst assum to in))
+       (HasArgType to ty))
+      ((HasArgType lhs ty))
+      :ruleset subst)
+
+;; Substitution typechecks only when the type of the
+;; argument matches the type of the substitution.
+(rule ((Subst assum to in)
+       (HasArgType in ty)
+       (HasType to ty2)
+       (!= ty ty2)
+       ;; tmptype disables typechecking
+       (!= ty (TmpType))
+       (!= ty2 (TmpType)))
+      ((extract "Extracting type mismatch")
+       (extract ty)
+       (extract ty2)
+       (panic "Substitution type mismatch! Argument type must match type of substituted term"))
+       :ruleset subst)
+
+
+;; leaf node with context
+;; replace this context- subst assumes the context is more specific
+(rule ((= lhs (Subst assum to e))
+       (= e (Arg _ty _oldctx))
+       )
+      ;; add the assumption `to`
+      ((DelayedSubstUnion lhs (AddContext assum to))
+       (subsume (Subst assum to e)))
+      :ruleset subst)
+(rule ((= lhs (Subst assum to e))
+       (= e (Const c _ty _oldctx))
+       (HasArgType to newty))
+      ((DelayedSubstUnion lhs (Const c newty assum))
+      (subsume (Subst assum to e)))
+      :ruleset subst)
+(rule ((= lhs (Subst assum to e))
+       (= e (Empty _ty _oldctx))
+       (HasArgType to newty))
+      ((DelayedSubstUnion lhs (Empty newty assum))
+      (subsume (Subst assum to e)))
+      :ruleset subst)
+
+;; Operators
+(rule ((= e (Top op c1 c2 c3))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Top op (Subst assum to c1)
+                 (Subst assum to c2)
+                 (Subst assum to c3)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+
+(rule ((= e (Bop op c1 c2))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Bop op (Subst assum to c1)
+                 (Subst assum to c2)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+(rule ((= e (Uop op c1))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Uop op (Subst assum to c1)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)    
+
+(rule ((= e (Get c1 index))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Get (Subst assum to c1) index))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+(rule ((= e (Alloc id c1 c2 ty))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Alloc id (Subst assum to c1)
+                   (Subst assum to c2)
+                   ty))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+(rule ((= e (Call name c1))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Call name (Subst assum to c1)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+
+
+;; Tuple operators
+(rule ((= e (Single c1))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Single (Subst assum to c1)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+(rule ((= e (Concat c1 c2))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (Concat (Subst assum to c1)
+                 (Subst assum to c2)))
+       (subsume (Subst assum to e)))
+         :ruleset subst)
+
+;; Control flow
+(rule ((= lhs (Subst assum to inner))
+       (= inner (Switch pred inputs c1))
+       (ExprIsResolved inner))
+      ((DelayedSubstUnion lhs
+         (Switch (Subst assum to pred)
+                 (Subst assum to inputs)
+                 c1))
+       (subsume (Subst assum to inner)))
+         :ruleset subst)
+(rule ((= lhs (Subst assum to inner))
+       (= inner (If pred inputs c1 c2))
+       (ExprIsResolved inner))
+      ((DelayedSubstUnion lhs
+         (If (Subst assum to pred)
+             (Subst assum to inputs)
+             c1
+             c2))
+       (subsume (Subst assum to inner)))
+         :ruleset subst)
+(rule ((= e (DoWhile in out))
+       (= lhs (Subst assum to e))
+       (ExprIsResolved e)
+       (ExprIsResolved to))
+      ((DelayedSubstUnion lhs
+         (DoWhile (Subst assum to in)
+                  out))
+       (subsume (Subst assum to e)))
+      :ruleset subst)
+
+;; substitute into function (convenience for testing)
+(rewrite (Subst assum to (Function name inty outty body))
+         (Function name inty outty (Subst assum to body))
+         :when ((ExprIsResolved body))
+         :ruleset subst)
+
+
+
+;; ########################### Apply subst unions
+
+(rule ((DelayedSubstUnion lhs rhs))
+      ((union lhs rhs))
+      :ruleset apply-subst-unions)"#;
