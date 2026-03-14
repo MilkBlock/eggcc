@@ -1,5 +1,6 @@
 mod add_context;
 mod context_prop;
+mod context_of;
 mod purity_analysis;
 mod schema;
 mod schema_dsl;
@@ -27,7 +28,7 @@ pub(crate) fn prologue() -> String {
         &add_context::fragment(),
         &context_prop::fragment(),
         &term_subst::fragment(),
-        include_str!("../utility/context_of.egg"),
+        &context_of::fragment(),
         include_str!("../utility/subst.egg"),
         include_str!("../utility/canonicalize.egg"),
         include_str!("../utility/expr_size.egg"),
@@ -255,6 +256,28 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/term_subst.rs)\n";
         const SECTION_HEADER: &str = "(ruleset term-subst)\n";
         const NEXT_SECTION_HEADER: &str = "; We only have context for Exprs, not ListExprs.\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_context_of_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_of.rs)\n";
+        const SECTION_HEADER: &str = "; We only have context for Exprs, not ListExprs.\n";
+        const NEXT_SECTION_HEADER: &str =
+            ";; Substitution rules allow for substituting some new expression for the argument\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -999,6 +1022,70 @@ mod tests {
     }
 
     #[test]
+    fn context_of_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_of.rs)\n";
+
+        let expected = include_str!("../utility/context_of.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::context_of::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/context_of.egg (generated marker stripped)",
+                    "context_of::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn context_of_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_of.rs)\n";
+
+        let fragment = super::context_of::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "context_of::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(relation ContextOf",
+            "(ContextOf (Arg ty ctx) ctx)",
+            "(ContextOf (Const c ty ctx) ctx)",
+            "(ContextOf (Empty ty ctx) ctx)",
+            "(panic \"Equivalent expressions have nonequivalent context",
+            "(ContextOf (Top op x y z) ctx)",
+            "(ContextOf (Bop op x y) ctx)",
+            "(ContextOf (Uop op x) ctx)",
+            "(ContextOf (Get tup i) ctx)",
+            "(ContextOf (Concat x y) ctx)",
+            "(ContextOf (Single x) ctx)",
+            "(ContextOf (Switch pred inputs branches) ctx)",
+            "(ContextOf (If pred inputs then else) ctx)",
+            "(ContextOf (DoWhile in pred-and-output) ctx)",
+            "(ContextOf (Call func arg) ctx)",
+            "(ContextOf (Alloc amt e state ty) ctx)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated context_of fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -1284,6 +1371,20 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_context_of_rules() {
+        let ctx = "(InFunc \"RLCR\")";
+        let expr = "(Bop (Add) (Const (Int 3) (Base (IntT)) (InFunc \"RLCR\")) (Const (Int 4) (Base (IntT)) (InFunc \"RLCR\")))";
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n(run-schedule {})\n(check (ContextOf __rlcr_expr {ctx}))\n",
+            crate::prologue(),
+            crate::schedule::types_and_indexing()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -1304,6 +1405,8 @@ mod tests {
         let actual = strip_context_prop_generated_sections(&actual);
         let expected = strip_term_subst_generated_sections(&expected);
         let actual = strip_term_subst_generated_sections(&actual);
+        let expected = strip_context_of_generated_sections(&expected);
+        let actual = strip_context_of_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
