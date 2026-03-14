@@ -94,7 +94,7 @@ mod tests {
 ; Top-level expressions
 ; =================================
 "#;
-        const FUNCTION_CONSTRUCTOR_START: &str = "(constructor Function";
+        const FUNCTION_HAS_TYPE_RELATION: &str = "(relation FunctionHasType";
         const TERMS_MARKER: &str = "; TERMS\n";
         const TERM_ASSUMPTION_TODO_COMMENT: &str =
             "; TODO: Will probably need ctx so that we can resubstitute?\n";
@@ -126,7 +126,7 @@ mod tests {
         let stripped = strip_section(
             &stripped,
             TOP_LEVEL_EXPRESSIONS_HEADER,
-            FUNCTION_CONSTRUCTOR_START,
+            FUNCTION_HAS_TYPE_RELATION,
         );
         let stripped = strip_section(&stripped, TERMS_MARKER, TERM_ASSUMPTION_TODO_COMMENT);
 
@@ -225,8 +225,21 @@ mod tests {
         );
 
         for constructor in [
-            "(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop", "(Get", "(Alloc", "(Call",
-            "(Single", "(Concat", "(Switch", "(If", "(DoWhile",
+            "(Arg",
+            "(Const",
+            "(Empty",
+            "(Top",
+            "(Bop",
+            "(Uop",
+            "(Get",
+            "(Alloc",
+            "(Call",
+            "(Single",
+            "(Concat",
+            "(Switch",
+            "(If",
+            "(DoWhile",
+            "(Function",
         ] {
             assert!(
                 expr_block.contains(constructor),
@@ -272,6 +285,17 @@ mod tests {
     fn schema_fragment_parses_migrated_control_flow_constructors() {
         let program = format!(
             "{}\n(let __rlcr_expr (If (Const (Bool true) (Base (BoolT)) (InFunc \"DUMMY\")) (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Switch (Const (Int 0) (Base (IntT)) (InFunc \"DUMMY\")) (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Cons (Single (Const (Int 1) (Base (IntT)) (InFunc \"DUMMY\"))) (Nil))) (DoWhile (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Single (Const (Bool false) (Base (BoolT)) (InFunc \"DUMMY\"))))))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_function_constructor() {
+        let program = format!(
+            "{}\n(let __rlcr_expr (Function \"main\" (Base (IntT)) (Base (IntT)) (Arg (Base (IntT)) (InFunc \"main\"))))\n",
             super::schema::fragment()
         );
 

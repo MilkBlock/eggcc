@@ -561,19 +561,19 @@ fn inject_program_type_section(schema: &str, replacement: &str) -> String {
 ; Top-level expressions
 ; =================================
 "#;
-    const FUNCTION_CONSTRUCTOR_START: &str = "(constructor Function";
+    const FUNCTION_HAS_TYPE_RELATION: &str = "(relation FunctionHasType";
 
     let header_start = schema
         .find(TOP_LEVEL_EXPRESSIONS_HEADER)
         .expect("schema.egg must contain the Top-level expressions header");
     let body_start = header_start + TOP_LEVEL_EXPRESSIONS_HEADER.len();
-    let function_constructor_start = schema[body_start..]
-        .find(FUNCTION_CONSTRUCTOR_START)
+    let function_has_type_relation_start = schema[body_start..]
+        .find(FUNCTION_HAS_TYPE_RELATION)
         .map(|idx| idx + body_start)
-        .expect("schema.egg must contain the Function constructor");
+        .expect("schema.egg must contain the FunctionHasType relation");
 
     assert!(
-        function_constructor_start >= body_start,
+        function_has_type_relation_start >= body_start,
         "schema.egg section ordering is unexpected"
     );
 
@@ -586,7 +586,7 @@ fn inject_program_type_section(schema: &str, replacement: &str) -> String {
         out.push_str("\n\n");
     }
 
-    out.push_str(&schema[function_constructor_start..]);
+    out.push_str(&schema[function_has_type_relation_start..]);
     out
 }
 

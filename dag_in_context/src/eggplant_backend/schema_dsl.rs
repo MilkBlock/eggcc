@@ -91,6 +91,12 @@ enum Expr {
         input: Expr,
         pred_and_body: Expr,
     },
+    Function {
+        name: String,
+        input_ty: Type,
+        output_ty: Type,
+        output: Expr,
+    },
 }
 
 #[eggplant::dsl]
