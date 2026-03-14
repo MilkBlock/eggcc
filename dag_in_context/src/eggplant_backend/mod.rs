@@ -140,7 +140,7 @@ mod tests {
         const RAW_START: &str = "(ruleset type-analysis)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Functions\n";
+        const END_MARKER: &str = "; find which types are pure\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -149,7 +149,7 @@ mod tests {
         let end = program[start..]
             .find(END_MARKER)
             .map(|idx| idx + start)
-            .expect("type_analysis.egg fragment must contain the functions boundary anchor");
+            .expect("type_analysis.egg fragment must contain the pure-types boundary anchor");
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -426,12 +426,12 @@ mod tests {
     fn type_analysis_fragment_contains_generated_declaration_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Functions\n";
+        const END_MARKER: &str = "; find which types are pure\n";
 
         let fragment = super::type_analysis::fragment();
         let generated_end = fragment
             .find(END_MARKER)
-            .expect("type_analysis::fragment() must retain the functions boundary anchor");
+            .expect("type_analysis::fragment() must retain the pure-types boundary anchor");
         let generated_prefix = &fragment[..generated_end];
 
         assert!(
@@ -476,6 +476,9 @@ mod tests {
             "(panic \"loop input must be tuple\")",
             "(ExpectType (Get pred-body 0) (Base (BoolT)) \"loop pred must be bool\")",
             "(panic \"input types and output types don't match\")",
+            "(ExpectType body out-ty \"Function body had wrong type\")",
+            "(ExpectType arg in-ty \"function called with wrong arg type\")",
+            "(HasType lhs out-ty)",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -580,6 +583,20 @@ mod tests {
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
             "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (IntT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_type_analysis_functions() {
+        let arg = "(Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let expr = "(Call \"callee\" (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let program = format!(
+            "{}\n(FunctionHasType \"callee\" (Base (IntT)) (Base (BoolT)))\n(let __rlcr_arg {arg})\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (BoolT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
             crate::prologue()
         );
 

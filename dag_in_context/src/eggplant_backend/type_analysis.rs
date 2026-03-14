@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const FUNCTIONS_COMMENT: &str = "; Functions\n";
+const PURE_TYPES_COMMENT: &str = "; find which types are pure\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -565,6 +565,38 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       )
       ((panic "input types and output types don't match"))
       :ruleset error-checking)
+
+; =================================
+; Functions
+; =================================
+
+(rule ((= lhs (Function name in-ty out-ty body)))
+      (
+        ; Arg should have the specified type in the body
+        (HasArgType body in-ty)
+        ; Expect the body to have the specified output type
+        (ExpectType body out-ty "Function body had wrong type")
+      )
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Call name arg))
+        (FunctionHasType name in-ty out-ty)
+      )
+      ; Expect the arg to have the right type for the function
+      ((ExpectType arg in-ty "function called with wrong arg type"))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Call name arg))
+        (FunctionHasType name in-ty out-ty)
+        (HasType arg in-ty)
+        ; We don't need to check the type of the function body, it will
+        ; be checked elsewhere. If we did require (HasType body out-ty),
+        ; recursive functions would not get assigned a type.
+      )
+      ((HasType lhs out-ty))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -611,8 +643,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(FUNCTIONS_COMMENT)
-        .expect("type_analysis.egg must contain the functions boundary anchor");
+        .find(PURE_TYPES_COMMENT)
+        .expect("type_analysis.egg must contain the pure-types boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
