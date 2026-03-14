@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const CONTROL_FLOW_COMMENT: &str = "; Control flow\n";
+const FUNCTIONS_COMMENT: &str = "; Functions\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -438,6 +438,133 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       ; rules between every iter of type-analysis rules.
       ((HasType lhs (TupleT (TLConcat tylist1 tylist2))))
       :ruleset type-analysis)
+
+; =================================
+; Control flow
+; =================================
+(rule ((= lhs (If pred inputs then else)))
+      ((ExpectType pred (Base (BoolT)) "If predicate must be boolean"))
+      :ruleset type-analysis)
+(rule (
+        (= lhs (If pred inputs then else))
+        (HasType pred (Base (BoolT)))
+        (HasType then ty)
+        (HasType else ty)
+      )
+      ((HasType lhs ty))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (If pred inputs then else))
+        (HasType pred (Base (BoolT)))
+        (HasType then tya)
+        (HasType else tyb)
+        (!= tya tyb)
+      )
+      ((panic "if branches had different types"))
+      :ruleset error-checking)
+
+
+
+(rule ((= lhs (Switch pred inputs branches)))
+      ((ExpectType pred (Base (IntT)) "Switch predicate must be integer"))
+      :ruleset type-analysis)
+
+; base case: single branch switch has type of branch
+(rule (
+        (= lhs (Switch pred inputs (Cons branch (Nil))))
+        (HasType pred (Base (IntT)))
+        (HasType branch ty)
+      )
+      ((HasType lhs ty))
+      :ruleset type-analysis)
+
+; recursive case: peel off a layer
+(rule ((Switch pred inputs (Cons branch rest)))
+      ((Switch pred inputs rest))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Switch pred inputs (Cons branch rest)))
+        (HasType pred (Base (IntT)))
+        (HasType branch ty)
+        (HasType (Switch pred inputs rest) ty) ; rest of the branches also have type ty
+      )
+      ((HasType lhs ty))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Switch pred inputs (Cons branch rest)))
+        (HasType pred (Base (IntT)))
+        (HasType branch tya)
+        (HasType (Switch pred inputs rest) tyb)
+        (!= tya tyb)
+      )
+      ((panic "switch branches had different types"))
+      :ruleset error-checking)
+
+(rule ((Arg ty ctx))
+      (
+        (HasType (Arg ty ctx) ty)
+        (HasArgType (Arg ty ctx) ty)
+      )
+      :ruleset type-analysis)
+
+
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType inp (Base ty))
+      )
+      ((panic "loop input must be tuple"))
+      :ruleset error-checking)
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType inp (Base (PointerT ty)))
+      )
+      ((panic "loop input must be tuple"))
+      :ruleset error-checking)
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType pred-body (Base ty))
+      )
+      ((panic "loop pred-body must be tuple"))
+      :ruleset error-checking)
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType pred-body (Base (PointerT ty)))
+      )
+      ((panic "loop pred-body must be tuple"))
+      :ruleset error-checking)
+
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType inp (TupleT tylist))
+      )
+      ((HasArgType pred-body (TupleT tylist)))
+      :ruleset type-analysis)
+
+(rule ((= lhs (DoWhile inp pred-body)))
+      ((ExpectType (Get pred-body 0) (Base (BoolT)) "loop pred must be bool"))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType inp (TupleT tylist)) ; input is a tuple
+        ; pred-body is a tuple where the first elt is a bool
+        ; and the rest of the list matches the input type
+        (HasType pred-body (TupleT (TCons (BoolT) tylist)))
+      )
+      ((HasType lhs (TupleT tylist))) ; whole thing has type of inputs/outputs
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (DoWhile inp pred-body))
+        (HasType inp (TupleT in-tys))
+        (HasType pred-body (TupleT (TCons (BoolT) out-tys)))
+        (!= in-tys out-tys)
+      )
+      ((panic "input types and output types don't match"))
+      :ruleset error-checking)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -484,8 +611,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(CONTROL_FLOW_COMMENT)
-        .expect("type_analysis.egg must contain the control-flow boundary anchor");
+        .find(FUNCTIONS_COMMENT)
+        .expect("type_analysis.egg must contain the functions boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
