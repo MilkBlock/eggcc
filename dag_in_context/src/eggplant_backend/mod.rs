@@ -162,12 +162,16 @@ mod tests {
         const RAW_START: &str = "(function ListExpr-length (ListExpr) i64 :no-merge)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
+        const NEXT_PROLOGUE_BOUNDARY: &str = "(ruleset terms)\n";
 
         let start = program
             .find(GENERATED_MARKER)
             .or_else(|| program.find(RAW_START))
             .expect("util.egg fragment must contain the generated marker or raw start");
-        let end = program.len();
+        let end = program[start..]
+            .find(NEXT_PROLOGUE_BOUNDARY)
+            .map(|idx| idx + start)
+            .unwrap_or(program.len());
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -509,11 +513,31 @@ mod tests {
 
     #[test]
     fn util_fragment_matches_util_file_except_generated_sections() {
-        let expected = include_str!("../utility/util.egg");
-        let actual = super::util::fragment();
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/util.rs)\n";
+        const TUPLE_LENGTH_DECL: &str = "(function tuple-length (Expr) i64 :no-merge)\n";
+        const TMP_CTX_DECL: &str = "(constructor TmpCtx () Assumption)\n";
 
-        let expected = strip_util_generated_sections(expected);
-        let actual = strip_util_generated_sections(&actual);
+        fn normalize_util_text(text: &str) -> String {
+            let mut normalized = text
+                .replace(GENERATED_MARKER, "")
+                .replace(TUPLE_LENGTH_DECL, "")
+                .replace(TMP_CTX_DECL, "");
+
+            while normalized.contains("\n\n\n") {
+                normalized = normalized.replace("\n\n\n", "\n\n");
+            }
+
+            normalized = normalized.replace(
+                "the query.\n\n(rule ((TmpCtx))",
+                "the query.\n(rule ((TmpCtx))",
+            );
+
+            normalized.trim_end().to_string()
+        }
+
+        let expected = normalize_util_text(include_str!("../utility/util.egg"));
+        let actual = normalize_util_text(&super::util::fragment());
 
         let diff = if expected == actual {
             String::new()
