@@ -96,7 +96,7 @@ mod tests {
 "#;
         const FUNCTION_HAS_TYPE_RELATION: &str = "(relation FunctionHasType";
         const TERMS_MARKER: &str = "; TERMS\n";
-        const TUPLE_OPERATORS_HEADER: &str = "; Tuple Operators\n";
+        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
 
         fn strip_section(program: &str, header: &str, next: &str) -> String {
             let header_start = program
@@ -127,7 +127,7 @@ mod tests {
             TOP_LEVEL_EXPRESSIONS_HEADER,
             FUNCTION_HAS_TYPE_RELATION,
         );
-        let stripped = strip_section(&stripped, TERMS_MARKER, TUPLE_OPERATORS_HEADER);
+        let stripped = strip_section(&stripped, TERMS_MARKER, LOOP_NUM_ITERS_GUESS_FUNCTION);
 
         stripped
             .replace("(constructor Arg (Type Assumption) Expr)\n", "")
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn injected_terms_section_contains_migrated_constructors() {
         const TERMS_MARKER: &str = "; TERMS\n";
-        const TUPLE_OPERATORS_HEADER: &str = "; Tuple Operators\n";
+        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
 
@@ -260,8 +260,8 @@ mod tests {
             .expect("schema::fragment() must contain the Terms marker")
             + TERMS_MARKER.len();
         let terms_block_end = schema
-            .find(TUPLE_OPERATORS_HEADER)
-            .expect("schema::fragment() must contain the Tuple Operators header");
+            .find(LOOP_NUM_ITERS_GUESS_FUNCTION)
+            .expect("schema::fragment() must contain the LoopNumItersGuess function");
         let terms_block = &schema[terms_block_start..terms_block_end];
 
         assert!(
@@ -279,6 +279,8 @@ mod tests {
             "(TermGet",
             "(TermAlloc",
             "(TermCall",
+            "(TermSingle",
+            "(TermConcat",
         ] {
             assert!(
                 terms_block.contains(constructor),
@@ -357,6 +359,17 @@ mod tests {
     fn schema_fragment_parses_migrated_term_operator_constructors() {
         let program = format!(
             "{}\n(let __rlcr_term (TermCall \"callee\" (TermGet (TermAlloc 0 (TermConst (Int 4)) (TermArg) (IntT)) 0)))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_tuple_term_constructors() {
+        let program = format!(
+            "{}\n(let __rlcr_term (TermConcat (TermSingle (TermConst (Int 1))) (TermSingle (TermCall \"callee\" (TermArg)))))\n",
             super::schema::fragment()
         );
 

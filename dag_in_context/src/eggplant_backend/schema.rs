@@ -669,19 +669,19 @@ fn inject_tuple_operations_section(schema: &str, replacement: &str) -> String {
 
 fn inject_terms_section(schema: &str, replacement: &str) -> String {
     const TERMS_MARKER: &str = "; TERMS\n";
-    const TUPLE_OPERATORS_HEADER: &str = "; Tuple Operators\n";
+    const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
 
     let marker_start = schema
         .find(TERMS_MARKER)
         .expect("schema.egg must contain the Terms marker");
     let body_start = marker_start + TERMS_MARKER.len();
-    let tuple_operators_header_start = schema[body_start..]
-        .find(TUPLE_OPERATORS_HEADER)
+    let loop_num_iters_guess_start = schema[body_start..]
+        .find(LOOP_NUM_ITERS_GUESS_FUNCTION)
         .map(|idx| idx + body_start)
         .expect("schema.egg must contain the Terms section boundary header");
 
     assert!(
-        tuple_operators_header_start >= body_start,
+        loop_num_iters_guess_start >= body_start,
         "schema.egg section ordering is unexpected"
     );
 
@@ -694,6 +694,6 @@ fn inject_terms_section(schema: &str, replacement: &str) -> String {
         out.push_str("\n\n");
     }
 
-    out.push_str(&schema[tuple_operators_header_start..]);
+    out.push_str(&schema[loop_num_iters_guess_start..]);
     out
 }

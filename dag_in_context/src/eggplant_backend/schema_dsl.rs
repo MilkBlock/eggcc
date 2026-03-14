@@ -142,6 +142,13 @@ enum Term {
         name: String,
         arg: Term,
     },
+    TermSingle {
+        term: Term,
+    },
+    TermConcat {
+        term1: Term,
+        term2: Term,
+    },
 }
 
 #[eggplant::dsl]
