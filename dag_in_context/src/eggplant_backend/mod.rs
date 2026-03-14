@@ -140,7 +140,7 @@ mod tests {
         const RAW_START: &str = "(ruleset type-analysis)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Tuple operations\n";
+        const END_MARKER: &str = "; Control flow\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -149,7 +149,7 @@ mod tests {
         let end = program[start..]
             .find(END_MARKER)
             .map(|idx| idx + start)
-            .expect("type_analysis.egg fragment must contain the tuple-operations boundary anchor");
+            .expect("type_analysis.egg fragment must contain the control-flow boundary anchor");
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -426,12 +426,12 @@ mod tests {
     fn type_analysis_fragment_contains_generated_declaration_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Tuple operations\n";
+        const END_MARKER: &str = "; Control flow\n";
 
         let fragment = super::type_analysis::fragment();
         let generated_end = fragment
             .find(END_MARKER)
-            .expect("type_analysis::fragment() must retain the other-ops boundary anchor");
+            .expect("type_analysis::fragment() must retain the control-flow boundary anchor");
         let generated_prefix = &fragment[..generated_end];
 
         assert!(
@@ -465,6 +465,9 @@ mod tests {
             "(HasType lhs (Base (TypeList-ith tylist i)))",
             "(panic \"index out of bounds\")",
             "(panic \"negative index\")",
+            "(panic \"don't nest tuples\")",
+            "(HasType lhs (TupleT (TCons basety (TNil))))",
+            "(HasType lhs (TupleT (TLConcat tylist1 tylist2)))",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -536,6 +539,22 @@ mod tests {
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
             "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (IntT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_type_analysis_tuple_operations() {
+        let left = "(Single (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let right = "(Single (Const (Bool true) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let expr = format!("(Concat {left} {right})");
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let expected_ty = "(TupleT (TCons (IntT) (TCons (BoolT) (TNil))))";
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr {expected_ty}))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
             crate::prologue()
         );
 

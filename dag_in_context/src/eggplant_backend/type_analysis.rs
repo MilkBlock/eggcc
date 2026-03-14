@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const TUPLE_OPERATIONS_COMMENT: &str = "; Tuple operations\n";
+const CONTROL_FLOW_COMMENT: &str = "; Control flow\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -410,6 +410,34 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       )
       ((panic "negative index"))
       :ruleset error-checking)
+
+; =================================
+; Tuple operations
+; =================================
+
+(rule (
+        (= lhs (Single e))
+        (HasType e (TupleT tylist))
+      )
+      ((panic "don't nest tuples"))
+      :ruleset error-checking)
+
+(rule (
+        (= lhs (Single e))
+        (HasType e (Base basety))
+      )
+      ((HasType lhs (TupleT (TCons basety (TNil)))))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Concat e1 e2))
+        (HasType e1 (TupleT tylist1))
+        (HasType e2 (TupleT tylist2))
+      )
+      ; TLConcat needs to compute immediately, so we need to saturate type-helpers
+      ; rules between every iter of type-analysis rules.
+      ((HasType lhs (TupleT (TLConcat tylist1 tylist2))))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -456,8 +484,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(TUPLE_OPERATIONS_COMMENT)
-        .expect("type_analysis.egg must contain the tuple-operations boundary anchor");
+        .find(CONTROL_FLOW_COMMENT)
+        .expect("type_analysis.egg must contain the control-flow boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
