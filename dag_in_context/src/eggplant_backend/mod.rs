@@ -1,4 +1,5 @@
 mod add_context;
+mod context_prop;
 mod purity_analysis;
 mod schema;
 mod schema_dsl;
@@ -23,7 +24,7 @@ pub(crate) fn prologue() -> String {
         // TODO cond inv code motion with regions
         //&crate::optimizations::conditional_invariant_code_motion::rules().join("\n"),
         &add_context::fragment(),
-        include_str!("../utility/context-prop.egg"),
+        &context_prop::fragment(),
         include_str!("../utility/term-subst.egg"),
         include_str!("../utility/context_of.egg"),
         include_str!("../utility/subst.egg"),
@@ -225,6 +226,22 @@ mod tests {
             &format!("\n\n{SECTION_HEADER}"),
             &format!("\n{SECTION_HEADER}"),
         );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_context_prop_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_prop.rs)\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset term-subst)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
         stripped = stripped.replace(
             &format!("\n\n{NEXT_SECTION_HEADER}"),
             &format!("\n{NEXT_SECTION_HEADER}"),
@@ -862,6 +879,41 @@ mod tests {
     }
 
     #[test]
+    fn context_prop_fragment_matches_empty_file_with_generated_marker_only() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_prop.rs)\n";
+
+        let expected = include_str!("../utility/context-prop.egg");
+        let actual = super::context_prop::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "");
+
+        assert!(
+            expected.is_empty(),
+            "utility/context-prop.egg must stay empty until real rules are migrated"
+        );
+        assert!(
+            actual.is_empty(),
+            "context_prop::fragment() must only emit the generated marker while the source file is empty"
+        );
+        assert_eq!(
+            expected, actual,
+            "context_prop::fragment() must match the empty source file once the generated marker is stripped"
+        );
+    }
+
+    #[test]
+    fn context_prop_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/context_prop.rs)\n";
+
+        let fragment = super::context_prop::fragment();
+        assert_eq!(
+            fragment, GENERATED_MARKER,
+            "context_prop::fragment() must be marker-only while utility/context-prop.egg is empty"
+        );
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -1147,6 +1199,8 @@ mod tests {
         let actual = strip_purity_analysis_generated_sections(&actual);
         let expected = strip_add_context_generated_sections(&expected);
         let actual = strip_add_context_generated_sections(&actual);
+        let expected = strip_context_prop_generated_sections(&expected);
+        let actual = strip_context_prop_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
