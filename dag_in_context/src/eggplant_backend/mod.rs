@@ -85,6 +85,11 @@ mod tests {
 ; =================================
 
 "#;
+        const CONTROL_FLOW_HEADER: &str = r#"; =================================
+; Control flow
+; =================================
+
+"#;
         const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
 ; Top-level expressions
 ; =================================
@@ -116,6 +121,7 @@ mod tests {
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
         let stripped = strip_section(&stripped, OPERATORS_HEADER, TUPLE_OPERATIONS_HEADER);
+        let stripped = strip_section(&stripped, TUPLE_OPERATIONS_HEADER, CONTROL_FLOW_HEADER);
         let stripped = strip_section(
             &stripped,
             TOP_LEVEL_EXPRESSIONS_HEADER,
@@ -219,6 +225,7 @@ mod tests {
 
         for constructor in [
             "(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop", "(Get", "(Alloc", "(Call",
+            "(Single", "(Concat",
         ] {
             assert!(
                 expr_block.contains(constructor),
@@ -242,6 +249,17 @@ mod tests {
     fn schema_fragment_parses_migrated_operator_expr_constructors() {
         let program = format!(
             "{}\n(let __rlcr_expr (Call \"callee\" (Get (Alloc 0 (Const (Int 4) (Base (IntT)) (InFunc \"DUMMY\")) (Arg (Base (StateT)) (InFunc \"DUMMY\")) (IntT)) 0)))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_tuple_operation_constructors() {
+        let program = format!(
+            "{}\n(let __rlcr_expr (Concat (Single (Const (Int 1) (Base (IntT)) (InFunc \"DUMMY\"))) (Single (Arg (Base (IntT)) (InFunc \"DUMMY\")))))\n",
             super::schema::fragment()
         );
 

@@ -69,6 +69,13 @@ enum Expr {
         name: String,
         arg: Expr,
     },
+    Single {
+        expr: Expr,
+    },
+    Concat {
+        expr1: Expr,
+        expr2: Expr,
+    },
 }
 
 #[eggplant::dsl]
