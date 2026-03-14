@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const OTHER_OPS_COMMENT: &str = "; Other ops\n";
+const TUPLE_OPERATIONS_COMMENT: &str = "; Tuple operations\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -375,6 +375,41 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       )
       ((HasType lhs (Base (PointerT ty))))
       :ruleset type-analysis)
+
+; Other ops
+(rule ((= lhs (Alloc _id amt state ty))) 
+      ((ExpectType amt (Base (IntT)) "(Alloc)"))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Alloc _id amt state ty))
+        (HasType amt (Base (IntT)))
+      )
+      ((HasType lhs (TupleT (TCons ty (TCons (StateT) (TNil))))))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Get e i))
+        (HasType e (TupleT tylist))
+      )
+      ; TypeList-ith needs to compute immediately, so we need to saturate type-helpers
+      ; rules between every iter of type-analysis rules.
+      ((HasType lhs (Base (TypeList-ith tylist i)))) 
+      :ruleset type-analysis)
+
+(rule (
+       (HasType (Get expr i) (TupleT tl))
+       (= (TypeList-length tl) len)
+       (>= i len))
+      ((panic "index out of bounds"))
+      :ruleset error-checking)
+(rule (
+      (HasType (Get expr i) (TupleT tl))
+       (= (TypeList-length tl) len)
+        (< i 0)
+      )
+      ((panic "negative index"))
+      :ruleset error-checking)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -421,8 +456,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(OTHER_OPS_COMMENT)
-        .expect("type_analysis.egg must contain the other-ops boundary anchor");
+        .find(TUPLE_OPERATIONS_COMMENT)
+        .expect("type_analysis.egg must contain the tuple-operations boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);

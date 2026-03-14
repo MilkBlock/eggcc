@@ -140,7 +140,7 @@ mod tests {
         const RAW_START: &str = "(ruleset type-analysis)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Other ops\n";
+        const END_MARKER: &str = "; Tuple operations\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -149,7 +149,7 @@ mod tests {
         let end = program[start..]
             .find(END_MARKER)
             .map(|idx| idx + start)
-            .expect("type_analysis.egg fragment must contain the arg-type propagation anchor");
+            .expect("type_analysis.egg fragment must contain the tuple-operations boundary anchor");
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -426,7 +426,7 @@ mod tests {
     fn type_analysis_fragment_contains_generated_declaration_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Other ops\n";
+        const END_MARKER: &str = "; Tuple operations\n";
 
         let fragment = super::type_analysis::fragment();
         let generated_end = fragment
@@ -461,6 +461,10 @@ mod tests {
             "(bop-of-type (Add) (Base (IntT)))",
             "(ExpectType val (Base ty) \"(Write)\")",
             "(Bop (PtrAdd) ptr n)",
+            "(ExpectType amt (Base (IntT)) \"(Alloc)\")",
+            "(HasType lhs (Base (TypeList-ith tylist i)))",
+            "(panic \"index out of bounds\")",
+            "(panic \"negative index\")",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -513,6 +517,22 @@ mod tests {
         let lhs = "(Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))";
         let rhs = "(Const (Int 5) (Base (StateT)) (InFunc \"DUMMY\"))";
         let expr = format!("(Bop (Add) {lhs} {rhs})");
+        let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (IntT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_runs_migrated_type_analysis_other_ops() {
+        let amount = "(Const (Int 4) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let state = "(Arg (Base (StateT)) (InFunc \"DUMMY\"))";
+        let alloc = format!("(Alloc 0 {amount} {state} (IntT))");
+        let expr = format!("(Get {alloc} 0)");
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
             "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (IntT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
