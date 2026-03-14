@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const UNARY_OPS_COMMENT: &str = "; Unary Ops\n";
+const BINARY_OPS_COMMENT: &str = "; Binary ops\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -179,6 +179,112 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       ((HasType lhs (TupleT (TNil)))
        (HasArgType lhs ty))
       :ruleset type-analysis)
+
+; Unary Ops
+(rule (
+        (= lhs (Uop (Not) e))
+        (HasType e (Base (BoolT)))
+      )
+      ((HasType lhs (Base (BoolT))))
+      :ruleset type-analysis)
+(rule ((= lhs (Uop (Not) e)))
+      ((ExpectType e (Base (BoolT)) "(Not)"))
+      :ruleset type-analysis)
+
+(rule (
+      (= lhs (Uop (Neg) e))
+      (HasType e (Base (IntT)))
+) (
+      (HasType lhs (Base (IntT)))
+) :ruleset type-analysis)
+
+(rule (
+      (= lhs (Uop (Neg) e))
+) (
+      (ExpectType e (Base (IntT)) "(Neg)")
+) :ruleset type-analysis)
+
+(rule (
+        (= lhs (Uop (Abs) e))
+        (HasType e (Base (IntT)))
+      )
+      ((HasType lhs (Base (IntT))))
+      :ruleset type-analysis)
+(rule ((= lhs (Uop (Abs) e)))
+      ((ExpectType e (Base (IntT)) "(Abs)"))
+      :ruleset type-analysis)
+
+
+(rule (
+        (= lhs (Bop (Print) e state))
+        (HasType e _ty)             ; just make sure it has some type.
+      )
+      ((HasType lhs (Base (StateT))))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Bop (Print) e state))
+        (HasType e (TupleT ty))
+      )
+      ((panic "Don't print a tuple"))
+      :ruleset error-checking)
+
+(rule ((= lhs (Bop (Free) e s))
+       (HasType e (Base (PointerT _ty))))
+      ((HasType lhs (Base (StateT))))
+      :ruleset type-analysis)
+(rule ((= lhs (Bop (Free) e s))
+       (HasType e (Base (IntT))))
+      ((panic "Free expected pointer, received integer"))
+      :ruleset error-checking)
+(rule ((= lhs (Bop (Free) e s))
+       (HasType e (TupleT _ty)))
+      ((panic "Free expected pointer, received tuple"))
+      :ruleset error-checking)
+
+(rule (
+        (= lhs (Bop (Load) e state))
+        (HasType e (Base (PointerT ty)))
+      )
+      ((HasType lhs (TupleT (TCons ty (TCons (StateT) (TNil))))))
+      :ruleset type-analysis)
+(rule (
+        (= lhs (Bop (Load) e state))
+        (HasType e ty)
+        (= ty (Base (IntT)))
+      )
+      ((panic "(Load) expected pointer, received int"))
+      :ruleset error-checking)
+(rule (
+        (= lhs (Bop (Load) e state))
+        (HasType e ty)
+        (= ty (TupleT x))
+      )
+      ((panic "(Load) expected pointer, received tuple"))
+      :ruleset error-checking)
+
+(rule (
+        (= lhs (Top (Select) pred v1 v2))
+      )
+      ((ExpectType pred (Base (BoolT)) "(Select)"))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Top (Select) pred v1 v2))
+        (HasType v1 ty)
+        (HasType v2 ty)
+      )
+      ((HasType lhs ty))
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Top (Select) pred v1 v2))
+        (HasType v1 ty1)
+        (HasType v2 ty2)
+        (!= ty1 ty2)
+      )
+      ((panic "(Select) branches had different types"))
+      :ruleset error-checking)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -225,8 +331,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(UNARY_OPS_COMMENT)
-        .expect("type_analysis.egg must contain the unary-ops boundary anchor");
+        .find(BINARY_OPS_COMMENT)
+        .expect("type_analysis.egg must contain the binary-ops boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);

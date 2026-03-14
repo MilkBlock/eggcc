@@ -140,7 +140,7 @@ mod tests {
         const RAW_START: &str = "(ruleset type-analysis)\n";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Unary Ops\n";
+        const END_MARKER: &str = "; Binary ops\n";
 
         let start = program
             .find(GENERATED_MARKER)
@@ -426,7 +426,7 @@ mod tests {
     fn type_analysis_fragment_contains_generated_declaration_prefix() {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-        const END_MARKER: &str = "; Unary Ops\n";
+        const END_MARKER: &str = "; Binary ops\n";
 
         let fragment = super::type_analysis::fragment();
         let generated_end = fragment
@@ -452,6 +452,10 @@ mod tests {
             "(rule ((= lhs (DoWhile ins body))",
             "(rule ((= lhs (Const (Int i) ty ctx)))",
             "(rule ((= lhs (Empty ty ctx)))",
+            "(ExpectType e (Base (BoolT)) \"(Not)\")",
+            "(ExpectType e (Base (IntT)) \"(Neg)\")",
+            "(panic \"Don't print a tuple\")",
+            "(panic \"(Select) branches had different types\")",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -473,10 +477,11 @@ mod tests {
 
     #[test]
     fn prologue_runs_migrated_has_arg_type_propagation_rules() {
-        let expr = "(Uop (Neg) (Arg (Base (IntT)) (InFunc \"DUMMY\")))";
+        let inner = "(Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let expr = format!("(Uop (Neg) {inner})");
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
-            "{}\n(let __rlcr_expr {expr})\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n{schedule}\n(check (HasArgType __rlcr_expr (Base (IntT))))\n",
+            "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (HasType __rlcr_expr (Base (IntT))))\n(check (HasArgType __rlcr_expr (Base (StateT))))\n",
             crate::prologue()
         );
 
@@ -486,11 +491,11 @@ mod tests {
 
     #[test]
     fn prologue_runs_migrated_type_analysis_primitives() {
-        let int_const = "(Const (Int 7) (Base (IntT)) (InFunc \"DUMMY\"))";
-        let empty = "(Empty (TupleT (TNil)) (InFunc \"DUMMY\"))";
+        let int_const = "(Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\"))";
+        let empty = "(Empty (Base (BoolT)) (InFunc \"DUMMY\"))";
         let schedule = format!("(run-schedule {})", crate::schedule::types_and_indexing());
         let program = format!(
-            "{}\n(let __rlcr_int {int_const})\n(let __rlcr_empty {empty})\n{schedule}\n(check (HasType __rlcr_int (Base (IntT))))\n(check (HasArgType __rlcr_int (Base (IntT))))\n(check (HasType __rlcr_empty (TupleT (TNil))))\n(check (HasArgType __rlcr_empty (TupleT (TNil))))\n",
+            "{}\n(let __rlcr_int {int_const})\n(let __rlcr_empty {empty})\n{schedule}\n(check (HasType __rlcr_int (Base (IntT))))\n(check (HasArgType __rlcr_int (Base (StateT))))\n(check (HasType __rlcr_empty (TupleT (TNil))))\n(check (HasArgType __rlcr_empty (Base (BoolT))))\n",
             crate::prologue()
         );
 
