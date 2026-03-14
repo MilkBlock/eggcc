@@ -76,6 +76,21 @@ enum Expr {
         expr1: Expr,
         expr2: Expr,
     },
+    Switch {
+        pred: Expr,
+        inputs: Expr,
+        branches: ListExpr,
+    },
+    If {
+        pred: Expr,
+        inputs: Expr,
+        then_branch: Expr,
+        else_branch: Expr,
+    },
+    DoWhile {
+        input: Expr,
+        pred_and_body: Expr,
+    },
 }
 
 #[eggplant::dsl]
@@ -192,11 +207,8 @@ pub(crate) fn expr_section() -> String {
         "BinaryOp",
         "UnaryOp",
         "Expr",
+        "ListExpr",
     ])
-}
-
-pub(crate) fn list_expr_section() -> String {
-    datatypes_section(&["ListExpr"])
 }
 
 pub(crate) fn program_type_section() -> String {

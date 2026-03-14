@@ -122,6 +122,7 @@ mod tests {
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
         let stripped = strip_section(&stripped, OPERATORS_HEADER, TUPLE_OPERATIONS_HEADER);
         let stripped = strip_section(&stripped, TUPLE_OPERATIONS_HEADER, CONTROL_FLOW_HEADER);
+        let stripped = strip_section(&stripped, CONTROL_FLOW_HEADER, TOP_LEVEL_EXPRESSIONS_HEADER);
         let stripped = strip_section(
             &stripped,
             TOP_LEVEL_EXPRESSIONS_HEADER,
@@ -225,7 +226,7 @@ mod tests {
 
         for constructor in [
             "(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop", "(Get", "(Alloc", "(Call",
-            "(Single", "(Concat",
+            "(Single", "(Concat", "(Switch", "(If", "(DoWhile",
         ] {
             assert!(
                 expr_block.contains(constructor),
@@ -260,6 +261,17 @@ mod tests {
     fn schema_fragment_parses_migrated_tuple_operation_constructors() {
         let program = format!(
             "{}\n(let __rlcr_expr (Concat (Single (Const (Int 1) (Base (IntT)) (InFunc \"DUMMY\"))) (Single (Arg (Base (IntT)) (InFunc \"DUMMY\")))))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_control_flow_constructors() {
+        let program = format!(
+            "{}\n(let __rlcr_expr (If (Const (Bool true) (Base (BoolT)) (InFunc \"DUMMY\")) (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Switch (Const (Int 0) (Base (IntT)) (InFunc \"DUMMY\")) (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Cons (Single (Const (Int 1) (Base (IntT)) (InFunc \"DUMMY\"))) (Nil))) (DoWhile (Empty (TupleT (TNil)) (InFunc \"DUMMY\")) (Single (Const (Bool false) (Base (BoolT)) (InFunc \"DUMMY\"))))))\n",
             super::schema::fragment()
         );
 

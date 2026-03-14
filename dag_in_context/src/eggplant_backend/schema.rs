@@ -1,12 +1,13 @@
 pub(crate) fn fragment() -> String {
     let schema = inject_expr_section(SCHEMA_EGGLOG, &super::schema_dsl::expr_section());
-    let schema = inject_list_expr_section(&schema, &super::schema_dsl::list_expr_section());
+    let schema = inject_list_expr_section(&schema, "");
     let schema = inject_types_section(&schema, "");
     let schema = inject_assumptions_section(&schema, "");
     let schema = inject_constants_section(&schema, "");
     let schema = remove_leaf_node_expr_constructors(&schema);
     let schema = inject_operators_section(&schema, "");
     let schema = inject_tuple_operations_section(&schema, "");
+    let schema = inject_control_flow_section(&schema, "");
     let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());
     inject_terms_section(&schema, &super::schema_dsl::terms_section())
 }
@@ -586,6 +587,44 @@ fn inject_program_type_section(schema: &str, replacement: &str) -> String {
     }
 
     out.push_str(&schema[function_constructor_start..]);
+    out
+}
+
+fn inject_control_flow_section(schema: &str, replacement: &str) -> String {
+    const CONTROL_FLOW_HEADER: &str = r#"; =================================
+; Control flow
+; =================================
+
+"#;
+    const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
+; Top-level expressions
+; =================================
+"#;
+
+    let header_start = schema
+        .find(CONTROL_FLOW_HEADER)
+        .expect("schema.egg must contain the Control flow section header");
+    let body_start = header_start + CONTROL_FLOW_HEADER.len();
+    let top_level_header_start = schema[body_start..]
+        .find(TOP_LEVEL_EXPRESSIONS_HEADER)
+        .map(|idx| idx + body_start)
+        .expect("schema.egg must contain the Top-level expressions section header");
+
+    assert!(
+        top_level_header_start >= body_start,
+        "schema.egg section ordering is unexpected"
+    );
+
+    let mut out = String::new();
+    out.push_str(&schema[..body_start]);
+
+    if !replacement.is_empty() {
+        out.push_str("; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n");
+        out.push_str(replacement.trim_end());
+        out.push_str("\n\n");
+    }
+
+    out.push_str(&schema[top_level_header_start..]);
     out
 }
 
