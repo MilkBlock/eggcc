@@ -7,7 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const BINARY_OPS_COMMENT: &str = "; Binary ops\n";
+const OTHER_OPS_COMMENT: &str = "; Other ops\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -285,6 +285,96 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       )
       ((panic "(Select) branches had different types"))
       :ruleset error-checking)
+
+; Binary ops
+
+;; Operators that have type Type -> Type -> Type
+;; Note we only do this generic matching for binary
+;; operator since there's a lot of them.
+;; In the future we can also extend to other constructs.
+(relation bop-of-type (BinaryOp Type))
+(bop-of-type (Bitand) (Base (IntT)))
+(bop-of-type (Add) (Base (IntT)))
+(bop-of-type (Sub) (Base (IntT)))
+(bop-of-type (Div) (Base (IntT)))
+(bop-of-type (Mul) (Base (IntT)))
+(bop-of-type (FAdd) (Base (FloatT)))
+(bop-of-type (FSub) (Base (FloatT)))
+(bop-of-type (FDiv) (Base (FloatT)))
+(bop-of-type (FMul) (Base (FloatT)))
+
+(rule (
+        (= lhs (Bop op e1 e2))
+        (bop-of-type op ty)
+        (HasType e1 ty)
+        (HasType e2 ty)
+      )
+      ((HasType lhs ty))
+      :ruleset type-analysis)
+(rule ((= lhs (Bop op e1 e2))
+       (bop-of-type op ty)
+       (bop->string op op-str))
+      (
+        (ExpectType e1 ty op-str)
+        (ExpectType e2 ty op-str)
+      )
+      :ruleset type-analysis)
+
+;; Operators that have type Float -> Float -> Bool
+(relation bpred-of-type (BinaryOp Type))
+(bpred-of-type (FLessThan) (Base (FloatT)))
+(bpred-of-type (FLessEq) (Base (FloatT)))
+(bpred-of-type (FGreaterThan) (Base (FloatT)))
+(bpred-of-type (FGreaterEq) (Base (FloatT)))
+(bpred-of-type (FEq) (Base (FloatT)))
+(bpred-of-type (LessThan) (Base (IntT)))
+(bpred-of-type (LessEq) (Base (IntT)))
+(bpred-of-type (GreaterThan) (Base (IntT)))
+(bpred-of-type (GreaterEq) (Base (IntT)))
+(bpred-of-type (Eq) (Base (IntT)))
+(bpred-of-type (And) (Base (BoolT)))
+(bpred-of-type (Or) (Base (BoolT)))
+
+(rule (
+        (= lhs (Bop pred e1 e2))
+        (bpred-of-type pred ty)
+        (HasType e1 ty)
+        (HasType e2 ty)
+      )
+      ((HasType lhs (Base (BoolT))))
+      :ruleset type-analysis)
+(rule ((= lhs (Bop pred e1 e2))
+       (bpred-of-type pred ty)
+       (bop->string pred pred-str))
+      (
+        (ExpectType e1 ty pred-str)
+        (ExpectType e2 ty pred-str)
+      )
+      :ruleset type-analysis)
+
+(rule (
+        (= lhs (Top (Write) ptr val state))
+        (HasType ptr (Base (PointerT ty)))
+        (HasType val (Base ty)) ; TODO need to support pointers to pointers
+      )
+      ((HasType lhs (Base (StateT)))) ; Write returns ()
+      :ruleset type-analysis)
+
+(rule (
+       (= lhs (Top (Write) ptr val state))
+       (HasType ptr (Base (PointerT ty))))
+      ((ExpectType val (Base ty) "(Write)"))
+      :ruleset type-analysis)
+
+
+
+(rule (
+        (= lhs (Bop (PtrAdd) ptr n))
+        (HasType ptr (Base (PointerT ty)))
+        (HasType n (Base (IntT)))
+      )
+      ((HasType lhs (Base (PointerT ty))))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -331,8 +421,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(BINARY_OPS_COMMENT)
-        .expect("type_analysis.egg must contain the binary-ops boundary anchor");
+        .find(OTHER_OPS_COMMENT)
+        .expect("type_analysis.egg must contain the other-ops boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
