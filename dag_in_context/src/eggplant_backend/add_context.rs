@@ -1,0 +1,118 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(ADD_CONTEXT);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/add_context.rs)\n";
+const ADD_CONTEXT: &str = r#"; This file provides AddContext, a helpers that copies a sub-egraph into
+; a new one with a new context.
+; Users of AddContext can specify how deeply to do this copy.
+
+
+(ruleset context)
+
+(constructor AddContext (Assumption Expr) Expr :unextractable)
+(constructor AddContextList (Assumption ListExpr) ListExpr :unextractable)
+
+;; ################################ saturation
+
+;; Adding context a second time does nothing, so union
+(rule
+  ((= lhs (AddContext ctx inner))
+   (= inner (AddContext ctx expr)))
+  ((union lhs inner))
+  :ruleset context)
+
+
+;; ############################## Base cases- leaf nodes
+
+;; replace existing contexts that are around leaf nodes
+;; AddContext assumes the new context is more specific than the old one
+(rule ((= lhs (AddContext ctx (Arg ty oldctx))))
+      ((union lhs (Arg ty ctx)))
+      :ruleset context)
+(rule ((= lhs (AddContext ctx (Const c ty oldctx))))
+      ((union lhs (Const c ty ctx)))
+      :ruleset context)
+(rule ((= lhs (AddContext ctx (Empty ty oldctx))))
+      ((union lhs (Empty ty ctx)))
+      :ruleset context)
+
+
+
+
+;; ######################################### Operators
+(rewrite (AddContext ctx (Top op c1 c2 c3))
+         (Top op
+           (AddContext ctx c1)
+           (AddContext ctx c2)
+           (AddContext ctx c3))
+               :ruleset context)
+(rewrite (AddContext ctx (Bop op c1 c2))
+         (Bop op
+           (AddContext ctx c1)
+           (AddContext ctx c2))
+               :ruleset context)
+(rewrite (AddContext ctx (Uop op c1))
+         (Uop op (AddContext ctx c1))
+         :ruleset context)
+(rewrite (AddContext ctx (Get c1 index))
+         (Get (AddContext ctx c1) index)
+               :ruleset context)
+(rewrite (AddContext ctx (Alloc id c1 state ty))
+         (Alloc id (AddContext ctx c1) (AddContext ctx state) ty)
+         :ruleset context)
+(rewrite (AddContext ctx (Call name c1))
+         (Call name (AddContext ctx c1))
+         :ruleset context)
+
+(rewrite (AddContext ctx (Single c1))
+         (Single (AddContext ctx c1))
+         :ruleset context)
+(rewrite (AddContext ctx (Concat c1 c2))
+         (Concat
+           (AddContext ctx c1)
+           (AddContext ctx c2))
+         :ruleset context)
+
+;; ################################### List operators
+
+(rewrite (AddContextList ctx (Nil))
+         (Nil)
+         :ruleset context)
+
+(rewrite (AddContextList ctx (Cons c1 rest))
+         (Cons (AddContext ctx c1)
+               (AddContextList ctx rest))
+               :ruleset context)
+
+
+;; ########################################## Control flow
+(rewrite (AddContext ctx (Switch pred inputs branches))
+         (Switch (AddContext ctx pred)
+                 (AddContext ctx inputs)
+                 branches)
+         :ruleset context)
+
+;; For stop at region, still add context to inputs
+(rule ((= lhs (AddContext ctx (If pred inputs c1 c2))))
+      ((union lhs
+         (If (AddContext ctx pred)
+             (AddContext ctx inputs)
+             c1
+             c2)))
+       :ruleset context)
+
+
+;; For stop at loop, still add context to inputs
+(rule ((= lhs (AddContext ctx (DoWhile inputs outputs))))
+      ((union lhs
+        (DoWhile
+          (AddContext ctx inputs)
+          outputs)))
+       :ruleset context)
+"#;
