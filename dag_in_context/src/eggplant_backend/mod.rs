@@ -1,5 +1,6 @@
 mod schema;
 mod schema_dsl;
+mod terms;
 mod type_analysis;
 mod util;
 
@@ -12,7 +13,7 @@ pub(crate) fn prologue() -> String {
         &schema::fragment(),
         &type_analysis::fragment(),
         &util::fragment(),
-        include_str!("../utility/terms.egg"),
+        &terms::fragment(),
         &crate::optimizations::is_valid::rules().join("\n"),
         &crate::optimizations::is_resolved::rules().join("\n"),
         &crate::optimizations::body_contains::rules().join("\n"),
@@ -172,6 +173,27 @@ mod tests {
             .find(NEXT_PROLOGUE_BOUNDARY)
             .map(|idx| idx + start)
             .unwrap_or(program.len());
+
+        let mut stripped = String::new();
+        stripped.push_str(&program[..start]);
+        stripped.push_str(&program[end..]);
+        stripped
+    }
+
+    fn strip_terms_generated_sections(program: &str) -> String {
+        const RAW_START: &str = "(ruleset terms)\n";
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
+        const END_MARKER: &str = "(sort Node)\n";
+
+        let start = program
+            .find(GENERATED_MARKER)
+            .or_else(|| program.find(RAW_START))
+            .expect("terms.egg fragment must contain the generated marker or raw start");
+        let end = program[start..]
+            .find(END_MARKER)
+            .map(|idx| idx + start)
+            .expect("terms.egg fragment must contain the node-sort boundary anchor");
 
         let mut stripped = String::new();
         stripped.push_str(&program[..start]);
@@ -611,6 +633,77 @@ mod tests {
     }
 
     #[test]
+    fn terms_fragment_matches_terms_file_except_generated_sections() {
+        let expected = include_str!("../utility/terms.egg");
+        let actual = super::terms::fragment();
+
+        let expected = strip_terms_generated_sections(expected);
+        let actual = strip_terms_generated_sections(&actual);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/terms.egg (generated sections stripped)",
+                    "terms::fragment() (generated sections stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn terms_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
+        const END_MARKER: &str = "(sort Node)\n";
+
+        let fragment = super::terms::fragment();
+        let generated_end = fragment
+            .find(END_MARKER)
+            .expect("terms::fragment() must retain the node-sort boundary anchor");
+        let generated_prefix = &fragment[..generated_end];
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "terms::fragment() must mark the generated prefix"
+        );
+
+        for declaration in [
+            "(ruleset terms)",
+            "(ruleset terms-helpers)",
+            "(ruleset terms-helpers-helpers)",
+            "(sort TermAndCost)",
+            "(constructor Smaller",
+            "(function ExtractedExpr",
+            ":merge (Smaller old new)",
+            "(relation PotentialExtractedExpr",
+            "(constructor TCPair",
+            "(constructor NoTerm",
+            "(TCPair (NoTerm) 10000000000000000)",
+            "(panic \"Negative cost\")",
+            "(union lhs (TCPair t1 cost1))",
+            "(union lhs (TCPair t2 cost2))",
+            "(PotentialExtractedExpr lhs (TCPair (TermConst c) 1))",
+            "(PotentialExtractedExpr lhs (TCPair (TermArg) 1))",
+            "(TermBop o t1 t2)",
+            "(TermTop o t1 t2 t3)",
+            "(TermUop o t1)",
+            "(TermGet t1 i)",
+            "(TermSingle t1)",
+            "(TermConcat t1 t2)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated terms prefix must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -818,6 +911,22 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_terms_prefix_rules() {
+        let left = "(Single (Const (Int 7) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let right = "(Single (Const (Bool true) (Base (StateT)) (InFunc \"DUMMY\")))";
+        let expr = format!("(Concat {left} {right})");
+        let schedule =
+            "(run-schedule (saturate terms (saturate terms-helpers (saturate terms-helpers-helpers))))";
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n{schedule}\n(check (= (ExtractedExpr __rlcr_expr) (TCPair (TermConcat (TermSingle (TermConst (Int 7))) (TermSingle (TermConst (Bool true)))) 2)))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -828,6 +937,8 @@ mod tests {
         let actual = strip_type_analysis_generated_sections(&actual);
         let expected = strip_util_generated_sections(&expected);
         let actual = strip_util_generated_sections(&actual);
+        let expected = strip_terms_generated_sections(&expected);
+        let actual = strip_terms_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

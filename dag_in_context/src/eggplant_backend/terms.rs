@@ -1,0 +1,157 @@
+pub(crate) fn fragment() -> String {
+    inject_generated_prefix(TERMS_EGGLOG, GENERATED_PREFIX)
+}
+
+const TERMS_EGGLOG: &str = include_str!("../utility/terms.egg");
+const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/terms.rs)\n";
+const NODE_SORT: &str = "(sort Node)\n";
+const GENERATED_PREFIX: &str = r#"(ruleset terms)
+;; helpers keeps track of the new best extracted terms
+(ruleset terms-helpers)
+;; helpers-helpers runs `Smaller` rules, resolving the merge function for helpers
+(ruleset terms-helpers-helpers)
+
+(sort TermAndCost)
+(constructor Smaller (TermAndCost TermAndCost) TermAndCost)
+
+(function ExtractedExpr (Expr) TermAndCost
+  :merge (Smaller old new))
+;; potential extractions- use so that when the costs are equal, we don't change the term
+;; this preserves egglog's timestamp of when the last time ExtractedExpr was changed, fixing a big performance problem
+(relation PotentialExtractedExpr (Expr TermAndCost))
+
+(constructor TCPair (Term i64) TermAndCost)
+
+(constructor NoTerm () Term)
+
+;; set extracted expr to default value
+(rule ((PotentialExtractedExpr expr termandcost))
+      ((set (ExtractedExpr expr) (TCPair (NoTerm) 10000000000000000)))
+      :ruleset terms-helpers)
+
+;; set extracted expr to new value as long as not equal
+(rule ((PotentialExtractedExpr expr (TCPair term cost))
+       (= (ExtractedExpr expr) (TCPair oldterm oldcost))
+       (< cost oldcost))
+      ((set (ExtractedExpr expr) (TCPair term cost)))
+      :ruleset terms-helpers)
+
+;; if the cost is negative panic, terms got too big
+(rule ((PotentialExtractedExpr expr (TCPair term cost))
+       (< cost 0))
+      ((panic "Negative cost"))
+      :ruleset terms-helpers)
+
+;; Resolve Smaller
+(rule (
+        (= lhs (Smaller (TCPair t1 cost1) (TCPair t2 cost2)))
+        (< cost1 cost2)
+      )
+      ((union lhs (TCPair t1 cost1)))
+      :ruleset terms-helpers-helpers)
+
+(rule (
+        (= lhs (Smaller (TCPair t1 cost1) (TCPair t2 cost2)))
+        (> cost1 cost2) 
+      )
+      ((union lhs (TCPair t2 cost2)))
+      :ruleset terms-helpers-helpers)
+
+
+(rule (
+        (= lhs (Smaller (TCPair t1 cost1) (TCPair t2 cost2)))
+        (= cost1 cost2) 
+      )
+      ;; arbitrarily pick first one
+      ((union lhs (TCPair t1 cost1)))
+      :ruleset terms-helpers-helpers)
+
+
+; Compute smallest Expr bottom-up
+(rule ((= lhs (Const c ty ass)))
+      ((PotentialExtractedExpr lhs (TCPair (TermConst c) 1)))
+      :ruleset terms)
+
+(rule ((= lhs (Arg ty ass)))
+      ((PotentialExtractedExpr lhs (TCPair (TermArg) 1)))
+      :ruleset terms)
+
+(rule (
+        (= lhs (Bop o e1 e2))
+        (= (TCPair t1 c1) (ExtractedExpr e1))
+        (= (TCPair t2 c2) (ExtractedExpr e2))
+      )
+      ((PotentialExtractedExpr lhs (TCPair (TermBop o t1 t2) (+ 1 (+ c1 c2)))))
+      :ruleset terms)
+
+(rule (
+        (= lhs (Top o e1 e2 e3))
+        (= (TCPair t1 c1) (ExtractedExpr e1))
+        (= (TCPair t2 c2) (ExtractedExpr e2))
+        (= (TCPair t3 c3) (ExtractedExpr e3))
+      )
+      ((PotentialExtractedExpr lhs (TCPair (TermTop o t1 t2 t3) (+ (+ 1 c1) (+ c2 c3)))))
+      :ruleset terms)
+
+(rule (
+        (= lhs (Uop o e1))
+        (= (TCPair t1 c1) (ExtractedExpr e1))
+      )
+      ((PotentialExtractedExpr lhs (TCPair (TermUop o t1) (+ 1 c1))))
+      :ruleset terms)
+
+(rule (
+        (= lhs (Get tup i))
+        (= (TCPair t1 c1) (ExtractedExpr tup))
+      )
+      ; cost of the get is the same as the  cost of the whole tuple
+      ((PotentialExtractedExpr lhs (TCPair (TermGet t1 i) c1)))
+      :ruleset terms)
+
+; todo Alloc
+
+; todo Call
+
+(rule (
+        (= lhs (Single e1))
+        (= (TCPair t1 c1) (ExtractedExpr e1))
+      )
+      ; cost of single is same as cost of the element
+      ((PotentialExtractedExpr lhs (TCPair (TermSingle t1) c1)))
+      :ruleset terms)
+
+(rule (
+        (= lhs (Concat e1 e2))
+        (= (TCPair t1 c1) (ExtractedExpr e1))
+        (= (TCPair t2 c2) (ExtractedExpr e2))
+      )
+      ; cost of concat is sum of the costs
+      ((PotentialExtractedExpr lhs (TCPair (TermConcat t1 t2) (+ c1 c2))))
+      :ruleset terms)
+
+
+; todo Control flow - not sure if needed
+; (rule (
+;         (= lhs (If pred inputs thn els))
+;         (= (TCPair t1 c1) (ExtractedExpr pred))
+;         (= (TCPair t2 c2) (ExtractedExpr inputs))
+;         (= (TCPair t3 c3) (ExtractedExpr thn))
+;         (= (TCPair t4 c4) (ExtractedExpr els))
+;       )
+;       ; cost of if is 10 + cost of pred + cost of input + max of branch costs
+;       ((PotentialExtractedExpr lhs (TCPair (TermIf t1 t2 t3 t4) (+ 10 (+ (+ c1 c2) (max c3 c4))))))
+;       :ruleset terms)
+"#;
+
+fn inject_generated_prefix(terms: &str, replacement: &str) -> String {
+    let raw_start = terms
+        .find(NODE_SORT)
+        .expect("utility/terms.egg must contain the node-sort boundary anchor");
+
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(replacement);
+    out.push_str("\n\n");
+    out.push_str(&terms[raw_start..]);
+    out
+}
