@@ -1,5 +1,6 @@
 mod schema;
 mod schema_dsl;
+mod type_analysis;
 
 pub(crate) fn prologue() -> String {
     // Ensure the `eggplant` dependency is linked when this feature is enabled,
@@ -8,7 +9,7 @@ pub(crate) fn prologue() -> String {
 
     [
         &schema::fragment(),
-        include_str!("../type_analysis.egg"),
+        &type_analysis::fragment(),
         include_str!("../utility/util.egg"),
         include_str!("../utility/terms.egg"),
         &crate::optimizations::is_valid::rules().join("\n"),
@@ -133,6 +134,27 @@ mod tests {
             .replace("(constructor Arg (Type Assumption) Expr)\n", "")
             .replace("(constructor Const (Constant Type Assumption) Expr)\n", "")
             .replace("(constructor Empty (Type Assumption) Expr)\n", "")
+    }
+
+    fn strip_type_analysis_generated_sections(program: &str) -> String {
+        const RAW_START: &str = "(ruleset type-analysis)\n";
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
+        const END_MARKER: &str = ";; Keep track of type expectations for error messages\n";
+
+        let start = program
+            .find(GENERATED_MARKER)
+            .or_else(|| program.find(RAW_START))
+            .expect("type_analysis.egg fragment must contain the generated marker or raw start");
+        let end = program[start..]
+            .find(END_MARKER)
+            .map(|idx| idx + start)
+            .expect("type_analysis.egg fragment must contain the arg-type propagation anchor");
+
+        let mut stripped = String::new();
+        stripped.push_str(&program[..start]);
+        stripped.push_str(&program[end..]);
+        stripped
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -378,12 +400,80 @@ mod tests {
     }
 
     #[test]
-    fn prologue_matches_text_backend_except_generated_schema_sections() {
+    fn type_analysis_fragment_matches_type_analysis_file_except_generated_sections() {
+        let expected = include_str!("../type_analysis.egg");
+        let actual = super::type_analysis::fragment();
+
+        let expected = strip_type_analysis_generated_sections(expected);
+        let actual = strip_type_analysis_generated_sections(&actual);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "type_analysis.egg (generated sections stripped)",
+                    "type_analysis::fragment() (generated sections stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn type_analysis_fragment_contains_generated_declaration_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
+        const END_MARKER: &str = ";; Keep track of type expectations for error messages\n";
+
+        let fragment = super::type_analysis::fragment();
+        let generated_end = fragment
+            .find(END_MARKER)
+            .expect("type_analysis::fragment() must retain the arg-type propagation anchor");
+        let generated_prefix = &fragment[..generated_end];
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "type_analysis::fragment() must mark the generated declaration prefix"
+        );
+
+        for declaration in [
+            "(ruleset type-analysis)",
+            "(ruleset type-helpers)",
+            "(constructor TLConcat",
+            "(function TypeList-length",
+            "(constructor TypeList-ith",
+            "(relation HasType",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated type_analysis prefix must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn prologue_parses_migrated_type_analysis_declarations() {
+        let program = format!(
+            "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
 
         let expected = strip_schema_generated_sections(&expected);
         let actual = strip_schema_generated_sections(&actual);
+        let expected = strip_type_analysis_generated_sections(&expected);
+        let actual = strip_type_analysis_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
