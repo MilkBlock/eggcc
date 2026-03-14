@@ -108,6 +108,9 @@ enum ListExpr {
 #[eggplant::dsl]
 enum Term {
     OpaqueTerm {},
+    TermArg {},
+    TermConst { constant: Constant },
+    TermEmpty {},
 }
 
 #[eggplant::dsl]

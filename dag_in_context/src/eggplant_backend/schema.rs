@@ -669,20 +669,19 @@ fn inject_tuple_operations_section(schema: &str, replacement: &str) -> String {
 
 fn inject_terms_section(schema: &str, replacement: &str) -> String {
     const TERMS_MARKER: &str = "; TERMS\n";
-    const TERM_ASSUMPTION_TODO_COMMENT: &str =
-        "; TODO: Will probably need ctx so that we can resubstitute?\n";
+    const TERM_OPERATORS_HEADER: &str = "; Term Operators\n";
 
     let marker_start = schema
         .find(TERMS_MARKER)
         .expect("schema.egg must contain the Terms marker");
     let body_start = marker_start + TERMS_MARKER.len();
-    let todo_comment_start = schema[body_start..]
-        .find(TERM_ASSUMPTION_TODO_COMMENT)
+    let term_operators_header_start = schema[body_start..]
+        .find(TERM_OPERATORS_HEADER)
         .map(|idx| idx + body_start)
-        .expect("schema.egg must contain the Terms section boundary comment");
+        .expect("schema.egg must contain the Terms section boundary header");
 
     assert!(
-        todo_comment_start >= body_start,
+        term_operators_header_start >= body_start,
         "schema.egg section ordering is unexpected"
     );
 
@@ -695,6 +694,6 @@ fn inject_terms_section(schema: &str, replacement: &str) -> String {
         out.push_str("\n\n");
     }
 
-    out.push_str(&schema[todo_comment_start..]);
+    out.push_str(&schema[term_operators_header_start..]);
     out
 }
