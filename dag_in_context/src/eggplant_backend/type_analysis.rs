@@ -7,8 +7,7 @@ pub(crate) fn fragment() -> String {
 const TYPE_ANALYSIS_EGGLOG: &str = include_str!("../type_analysis.egg");
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/type_analysis.rs)\n";
-const DONT_PUSH_ARG_TYPES_THROUGH_NEW_CONTEXTS_COMMENT: &str =
-    "; Don't push arg types through Program, Function, DoWhile, Let exprs because\n";
+const UNARY_OPS_COMMENT: &str = "; Unary Ops\n";
 const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) r) r :ruleset type-helpers)
 (rewrite (TLConcat (TCons hd tl) r)
          (TCons hd (TLConcat tl r))
@@ -156,6 +155,30 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
        (HasArgType ins ty))
       ((HasArgType lhs ty))
       :ruleset type-analysis)
+
+; Don't push arg types through Program, Function, DoWhile, Let exprs because
+; these create new arg contexts.
+
+; Primitives
+(rule ((= lhs (Const (Int i) ty ctx)))
+      ((HasType lhs (Base (IntT)))
+       (HasArgType lhs ty))
+      :ruleset type-analysis)
+
+(rule ((= lhs (Const (Bool b) ty ctx)))
+      ((HasType lhs (Base (BoolT)))
+       (HasArgType lhs ty))
+      :ruleset type-analysis)
+
+(rule ((= lhs (Const (Float b) ty ctx)))
+      ((HasType lhs (Base (FloatT)))
+       (HasArgType lhs ty))
+      :ruleset type-analysis)
+
+(rule ((= lhs (Empty ty ctx)))
+      ((HasType lhs (TupleT (TNil)))
+       (HasArgType lhs ty))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -202,8 +225,8 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
     let raw_start = type_analysis
-        .find(DONT_PUSH_ARG_TYPES_THROUGH_NEW_CONTEXTS_COMMENT)
-        .expect("type_analysis.egg must contain the arg-type propagation boundary anchor");
+        .find(UNARY_OPS_COMMENT)
+        .expect("type_analysis.egg must contain the unary-ops boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
