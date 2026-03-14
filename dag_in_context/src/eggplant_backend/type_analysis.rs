@@ -597,6 +597,30 @@ const GENERATED_PREFIX_RULES_AND_RELATIONS: &str = r#"(rewrite (TLConcat (TNil) 
       )
       ((HasType lhs out-ty))
       :ruleset type-analysis)
+
+; find which types are pure
+(relation PureBaseType (BaseType))
+(relation PureType (Type))
+(relation PureTypeList (TypeList))
+
+(PureBaseType (IntT))
+(PureBaseType (BoolT))
+(rule ((Base ty)
+       (PureBaseType ty))
+      ((PureType (Base ty)))
+      :ruleset type-analysis)
+(rule ((TupleT tylist)
+       (PureTypeList tylist))
+      ((PureType (TupleT tylist)))
+      :ruleset type-analysis)
+(rule ((TNil))
+      ((PureTypeList (TNil)))
+      :ruleset type-analysis)
+(rule ((TCons hd tl)
+       (PureBaseType hd)
+       (PureTypeList tl))
+      ((PureTypeList (TCons hd tl)))
+      :ruleset type-analysis)
 "#;
 
 fn generated_declarations_section() -> String {
@@ -642,14 +666,12 @@ fn schema(inputs: &[&str], output: &str) -> Schema {
 }
 
 fn inject_generated_prefix(type_analysis: &str, replacement: &str) -> String {
-    let raw_start = type_analysis
+    type_analysis
         .find(PURE_TYPES_COMMENT)
         .expect("type_analysis.egg must contain the pure-types boundary anchor");
 
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
     out.push_str(replacement);
-    out.push_str("\n\n");
-    out.push_str(&type_analysis[raw_start..]);
     out
 }
