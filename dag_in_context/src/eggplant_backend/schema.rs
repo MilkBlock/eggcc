@@ -6,7 +6,6 @@ pub(crate) fn fragment() -> String {
     let schema = inject_constants_section(&schema, "");
     let schema = remove_leaf_node_expr_constructors(&schema);
     let schema = inject_operators_section(&schema, "");
-    let schema = remove_operator_expr_constructors(&schema);
     let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());
     inject_terms_section(&schema, &super::schema_dsl::terms_section())
 }
@@ -435,20 +434,23 @@ fn inject_operators_section(schema: &str, replacement: &str) -> String {
 ; =================================
 
 "#;
-    const OPERATORS_CONSTRUCTORS_START: &str = r#"; Operators
-(constructor Top"#;
+    const TUPLE_OPERATIONS_HEADER: &str = r#"; =================================
+; Tuple operations
+; =================================
+
+"#;
 
     let header_start = schema
         .find(OPERATORS_HEADER)
         .expect("schema.egg must contain the Operators section header");
     let body_start = header_start + OPERATORS_HEADER.len();
-    let constructors_start = schema[body_start..]
-        .find(OPERATORS_CONSTRUCTORS_START)
+    let tuple_operations_header_start = schema[body_start..]
+        .find(TUPLE_OPERATIONS_HEADER)
         .map(|idx| idx + body_start)
-        .expect("schema.egg must contain the Operators constructors section");
+        .expect("schema.egg must contain the Tuple operations section header");
 
     assert!(
-        constructors_start >= body_start,
+        tuple_operations_header_start >= body_start,
         "schema.egg section ordering is unexpected"
     );
 
@@ -461,7 +463,7 @@ fn inject_operators_section(schema: &str, replacement: &str) -> String {
         out.push_str("\n\n");
     }
 
-    out.push_str(&schema[constructors_start..]);
+    out.push_str(&schema[tuple_operations_header_start..]);
     out
 }
 
@@ -546,23 +548,6 @@ fn remove_leaf_node_expr_constructors(schema: &str) -> String {
             out = out.replacen(constructor, "", 1);
         } else {
             panic!("schema.egg must contain the leaf Expr constructor:\n{constructor}");
-        }
-    }
-
-    out
-}
-
-fn remove_operator_expr_constructors(schema: &str) -> String {
-    const TOP_CONSTRUCTOR: &str = "(constructor Top   (TernaryOp Expr Expr Expr) Expr)\n";
-    const BOP_CONSTRUCTOR: &str = "(constructor Bop   (BinaryOp Expr Expr) Expr)\n";
-    const UOP_CONSTRUCTOR: &str = "(constructor Uop   (UnaryOp Expr) Expr)\n";
-
-    let mut out = schema.to_owned();
-    for constructor in [TOP_CONSTRUCTOR, BOP_CONSTRUCTOR, UOP_CONSTRUCTOR] {
-        if out.contains(constructor) {
-            out = out.replacen(constructor, "", 1);
-        } else {
-            panic!("schema.egg must contain the operator Expr constructor:\n{constructor}");
         }
     }
 

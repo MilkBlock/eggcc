@@ -55,6 +55,20 @@ enum Expr {
         op: UnaryOp,
         expr: Expr,
     },
+    Get {
+        expr: Expr,
+        index: i64,
+    },
+    Alloc {
+        id: i64,
+        amount: Expr,
+        state_edge: Expr,
+        pointer_ty: BaseType,
+    },
+    Call {
+        name: String,
+        arg: Expr,
+    },
 }
 
 #[eggplant::dsl]

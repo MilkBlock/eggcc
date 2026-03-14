@@ -80,7 +80,11 @@ mod tests {
 ; =================================
 
 "#;
-        const OPERATORS_CONSTRUCTORS_START: &str = "(constructor Get";
+        const TUPLE_OPERATIONS_HEADER: &str = r#"; =================================
+; Tuple operations
+; =================================
+
+"#;
         const TOP_LEVEL_EXPRESSIONS_HEADER: &str = r#"; =================================
 ; Top-level expressions
 ; =================================
@@ -111,7 +115,7 @@ mod tests {
         let stripped = strip_section(&stripped, TYPES_HEADER, ASSUMPTIONS_HEADER);
         let stripped = strip_section(&stripped, ASSUMPTIONS_HEADER, LEAF_NODES_HEADER);
         let stripped = strip_section(&stripped, CONSTANTS_MARKER, CONST_CONSTRUCTOR_COMMENT);
-        let stripped = strip_section(&stripped, OPERATORS_HEADER, OPERATORS_CONSTRUCTORS_START);
+        let stripped = strip_section(&stripped, OPERATORS_HEADER, TUPLE_OPERATIONS_HEADER);
         let stripped = strip_section(
             &stripped,
             TOP_LEVEL_EXPRESSIONS_HEADER,
@@ -123,9 +127,6 @@ mod tests {
             .replace("(constructor Arg (Type Assumption) Expr)\n", "")
             .replace("(constructor Const (Constant Type Assumption) Expr)\n", "")
             .replace("(constructor Empty (Type Assumption) Expr)\n", "")
-            .replace("(constructor Top   (TernaryOp Expr Expr Expr) Expr)\n", "")
-            .replace("(constructor Bop   (BinaryOp Expr Expr) Expr)\n", "")
-            .replace("(constructor Uop   (UnaryOp Expr) Expr)\n", "")
     }
 
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
@@ -216,7 +217,9 @@ mod tests {
             "Expr section must be generated from eggplant DSL"
         );
 
-        for constructor in ["(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop"] {
+        for constructor in [
+            "(Arg", "(Const", "(Empty", "(Top", "(Bop", "(Uop", "(Get", "(Alloc", "(Call",
+        ] {
             assert!(
                 expr_block.contains(constructor),
                 "Injected Expr section must contain {constructor}"
@@ -228,6 +231,17 @@ mod tests {
     fn schema_fragment_parses_migrated_expr_constructor_with_dependent_sorts() {
         let program = format!(
             "{}\n(let __rlcr_expr (Arg (Base (IntT)) (InFunc \"DUMMY\")))\n",
+            super::schema::fragment()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
+    fn schema_fragment_parses_migrated_operator_expr_constructors() {
+        let program = format!(
+            "{}\n(let __rlcr_expr (Call \"callee\" (Get (Alloc 0 (Const (Int 4) (Base (IntT)) (InFunc \"DUMMY\")) (Arg (Base (StateT)) (InFunc \"DUMMY\")) (IntT)) 0)))\n",
             super::schema::fragment()
         );
 

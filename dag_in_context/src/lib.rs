@@ -71,6 +71,7 @@ pub fn prologue() -> String {
     }
 }
 
+#[cfg_attr(feature = "eggplant", allow(dead_code))]
 pub(crate) fn prologue_egglog_text() -> String {
     [
         include_str!("schema.egg"),
