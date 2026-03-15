@@ -1,5 +1,4 @@
 use crate::schema_helpers::{Constructor, Purpose};
-use std::iter;
 use strum::IntoEnumIterator;
 
 #[cfg(test)]
@@ -81,11 +80,19 @@ fn is_invariant_rule_for_ctor(ctor: Constructor) -> Option<String> {
     }
 }
 
-pub(crate) fn rules() -> Vec<String> {
-    iter::once(include_str!("loop_invariant.egg").to_string())
-        .chain(Constructor::iter().filter_map(is_inv_base_case_for_ctor))
+const LOOP_INVARIANT: &str = include_str!("loop_invariant.egg");
+
+pub(crate) fn generated_rules() -> Vec<String> {
+    Constructor::iter()
+        .filter_map(is_inv_base_case_for_ctor)
         .chain(Constructor::iter().filter_map(is_invariant_rule_for_ctor))
         .collect::<Vec<_>>()
+}
+
+pub(crate) fn rules() -> Vec<String> {
+    let mut rules = vec![LOOP_INVARIANT.to_string()];
+    rules.extend(generated_rules());
+    rules
 }
 
 #[test]

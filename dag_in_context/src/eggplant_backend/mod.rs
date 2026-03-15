@@ -5,6 +5,7 @@ mod context_prop;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
+mod loop_invariant;
 mod mem_simple;
 mod memory;
 mod peepholes;
@@ -50,7 +51,7 @@ pub(crate) fn prologue() -> String {
         &crate::optimizations::memory::rules(),
         &memory::fragment(),
         &mem_simple::fragment(),
-        &crate::optimizations::loop_invariant::rules().join("\n"),
+        &loop_invariant::rules(),
         include_str!("../optimizations/loop_simplify.egg"),
         include_str!("../optimizations/loop_unroll.egg"),
         include_str!("../optimizations/swap_if.egg"),
@@ -522,6 +523,22 @@ mod tests {
         stripped = stripped.replace(
             &format!("\n\n{NEXT_SECTION_HEADER}"),
             &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_loop_invariant_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_invariant.rs)\n";
+        const SECTION_HEADER: &str = ";; Loop Invariant\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
         );
         stripped
     }
@@ -1912,6 +1929,64 @@ mod tests {
     }
 
     #[test]
+    fn loop_invariant_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_invariant.rs)\n";
+
+        let expected = include_str!("../optimizations/loop_invariant.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::loop_invariant::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/loop_invariant.egg (generated marker stripped)",
+                    "loop_invariant::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn loop_invariant_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_invariant.rs)\n";
+
+        let fragment = super::loop_invariant::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "loop_invariant::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            ";; Loop Invariant",
+            "(relation is-inv-Expr (Expr Expr))",
+            "(relation is-inv-ListExpr (Expr ListExpr))",
+            "(function to-hoist (Expr Expr) Expr :merge new)",
+            "(function to-hoist-size (Expr Expr) i64 :merge (max old new))",
+            "(ruleset boundary-analysis)",
+            "(ruleset boundary-analysis-prep)",
+            "(ruleset loop-inv-motion)",
+            "(set (to-hoist inputs body) expr)",
+            "(set (LoopNumItersGuess new_input new_body) iter-guess)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated loop_invariant fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2395,6 +2470,73 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_loop_invariant_rules() -> crate::Result {
+        use crate::add_context::ContextCache;
+        use crate::ast::*;
+        use crate::interpreter::Value;
+        use crate::schema::Assumption;
+
+        let mut cache = ContextCache::new_dummy_ctx();
+        let output_ty = tuplet!(intt(), intt(), intt(), statet());
+        let inner_inv = getat(1);
+        let inv = add(inner_inv.clone(), int(1));
+        let print = tprint(inv.clone(), getat(3));
+
+        let my_loop = dowhile(
+            parallel!(getat(0), getat(1), getat(2), getat(3)),
+            parallel!(
+                less_than(getat(0), getat(1)),
+                int(3),
+                getat(1),
+                getat(2),
+                print,
+            ),
+        )
+        .with_arg_types(output_ty.clone(), output_ty.clone())
+        .add_ctx_with_cache(Assumption::dummy(), &mut cache);
+
+        let new_out_ty = tuplet!(intt(), intt(), intt(), statet(), intt());
+        let mut cache = ContextCache::new_symbolic_ctx();
+
+        let hoisted_loop = dowhile(
+            parallel!(
+                getat(0),
+                getat(1),
+                getat(2),
+                getat(3),
+                add(int(1), getat(1))
+            ),
+            parallel!(
+                less_than(getat(0), getat(1)),
+                int(3),
+                getat(1),
+                getat(2),
+                tprint(getat(4), getat(3)),
+                getat(4)
+            ),
+        )
+        .with_arg_types(output_ty.clone(), new_out_ty)
+        .add_ctx_with_cache(Assumption::dummy(), &mut cache);
+
+        let build = format!("(let loop {}) \n", my_loop);
+        let check = format!(
+            "(check {})
+             (check (= loop (SubTuple {} 0 4)))",
+            hoisted_loop.clone(),
+            hoisted_loop
+        );
+
+        crate::egglog_test(
+            &build,
+            &check,
+            vec![],
+            Value::Tuple(vec![]),
+            Value::Tuple(vec![]),
+            vec![],
+        )
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2437,6 +2579,8 @@ mod tests {
         let actual = strip_memory_generated_sections(&actual);
         let expected = strip_mem_simple_generated_sections(&expected);
         let actual = strip_mem_simple_generated_sections(&actual);
+        let expected = strip_loop_invariant_generated_sections(&expected);
+        let actual = strip_loop_invariant_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

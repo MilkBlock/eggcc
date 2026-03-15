@@ -1,0 +1,106 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(LOOP_INVARIANT);
+    out.push('\n');
+    out
+}
+
+pub(crate) fn rules() -> String {
+    let mut out = fragment();
+    out.push('\n');
+    out.push_str(&crate::optimizations::loop_invariant::generated_rules().join("\n"));
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/loop_invariant.rs)\n";
+const LOOP_INVARIANT: &str = r#";; Loop Invariant
+
+;; For a loop body, this expression is invariant (calculates the same value every loop)
+;;                     body, inv-expr
+(relation is-inv-Expr (Expr Expr))
+(relation is-inv-ListExpr (Expr ListExpr))
+
+(relation is-inv-ListExpr-helper (Expr ListExpr i64))
+(rule ((BodyContainsListExpr body list) ) 
+      ((is-inv-ListExpr-helper body list 0)) :ruleset always-run)
+
+(rule ((is-inv-ListExpr-helper body list i)
+       (is-inv-Expr body (ListExpr-ith list i)))
+    ((is-inv-ListExpr-helper body list (+ i 1))) :ruleset always-run)
+
+(rule ((is-inv-ListExpr-helper body list i)
+       (= i (ListExpr-length list)))
+    ((is-inv-ListExpr body list)) :ruleset always-run)
+
+
+(ruleset boundary-analysis)
+(ruleset boundary-analysis-prep)
+
+;; We use a function so that we choose just one
+;; thing to hoist at a time
+;; This is an evil hack!
+;                   inputs body invariant-expr
+(function to-hoist (Expr Expr) Expr :merge new)
+;; The biggest invariant expression's size
+(function to-hoist-size (Expr Expr) i64 :merge (max old new))
+
+;; figure out max cost of invariant to hoist
+;; pick a random invariant expression
+(rule ((is-inv-Expr body expr)
+       (DoWhile inputs body)
+       (HasType expr inv_type)
+       (= inv_type (Base base_inv_ty))
+       (= size (Expr-size expr)))
+      ((set (to-hoist-size inputs body) size)) :ruleset boundary-analysis-prep)
+
+;; pick a bigger one if possible
+(rule ((is-inv-Expr body expr)
+       (DoWhile inputs body)
+       (HasType expr inv_type)
+       (= inv_type (Base base_inv_ty))
+       (= (Expr-size expr) (to-hoist-size inputs body)))
+      ((set (to-hoist inputs body) expr)) :ruleset boundary-analysis)
+
+;; mock function
+(ruleset loop-inv-motion)
+
+(rule ((= (to-hoist in body) inv)
+       (> (Expr-size inv) 1)
+       ;; TODO: replace Expr-size when cost model is ready
+       (= loop (DoWhile in body))
+       ;; the outter assumption of the loop 
+       (ContextOf loop loop_ctx)
+       (HasType in in_type)
+       (HasType inv inv_type)
+       (= inv_type (Base base_inv_ty))
+       (= in_type (TupleT tylist))
+       (= len (tuple-length in))
+       (= iter-guess (LoopNumItersGuess in body)))
+      ((RELIESONCONTEXT)
+       (let new_input (Concat in (Single (Subst loop_ctx in inv))))
+       (let new_input_type (TupleT (TLConcat tylist (TCons base_inv_ty (TNil)))))
+
+       ;; create an virtual assume node, union it with actuall InLoop later
+       (let assum (TmpCtx))
+       (let new_out_branch (Get (Arg new_input_type assum) len))
+
+       ;; this two subst only change arg to arg with new type
+       (let substed_body
+         (Subst assum
+               (SubTuple (Arg new_input_type assum) 0 len) body))
+       (let inv_in_new_loop
+            (Subst assum (SubTuple (Arg new_input_type assum) 0 len) inv))
+       (let new_body (Concat substed_body (Single new_out_branch)))
+       
+       (let new_loop (DoWhile new_input new_body))
+       (union assum (InLoop new_input new_body))
+       (union inv_in_new_loop new_out_branch)
+       (let wrapper (SubTuple new_loop 0 len))
+       (union loop wrapper)
+       (subsume (DoWhile in body)) 
+       (delete (TmpCtx))
+       (set (LoopNumItersGuess new_input new_body) iter-guess)
+      )
+       :ruleset loop-inv-motion)"#;
