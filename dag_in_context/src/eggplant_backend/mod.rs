@@ -8,6 +8,7 @@ mod interval_analysis;
 mod purity_analysis;
 mod schema;
 mod schema_dsl;
+mod select;
 mod subst;
 mod switch_rewrites;
 mod term_subst;
@@ -41,7 +42,7 @@ pub(crate) fn prologue() -> String {
         &drop_at::fragment(),
         &interval_analysis::fragment(),
         &switch_rewrites::fragment(),
-        include_str!("../optimizations/select.egg"),
+        &select::fragment(),
         include_str!("../optimizations/peepholes.egg"),
         &crate::optimizations::memory::rules(),
         include_str!("../optimizations/memory.egg"),
@@ -427,6 +428,28 @@ mod tests {
         stripped
     }
 
+    fn strip_select_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/select.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset select_opt)\n";
+        const NEXT_SECTION_HEADER: &str =
+            "; Simple rewrites that don't do a ton with control flow.\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
     fn eval_and_extract_expr(prologue: &str, expr: &str) -> String {
         let binding = "__rlcr_expr";
         let program = format!("{prologue}\n(let {binding} {expr})\n");
@@ -701,7 +724,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "type_analysis::fragment() must mark the generated declaration prefix"
         );
 
@@ -811,7 +834,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "util::fragment() must mark the generated prefix"
         );
 
@@ -892,7 +915,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "terms::fragment() must mark the generated prefix"
         );
 
@@ -964,7 +987,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "purity_analysis::fragment() must mark the generated fragment"
         );
 
@@ -1026,7 +1049,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "add_context::fragment() must mark the generated fragment"
         );
 
@@ -1126,7 +1149,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "term_subst::fragment() must mark the generated fragment"
         );
 
@@ -1189,7 +1212,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "context_of::fragment() must mark the generated fragment"
         );
 
@@ -1251,7 +1274,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "subst::fragment() must mark the generated fragment"
         );
 
@@ -1323,7 +1346,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "canonicalize::fragment() must mark the generated fragment"
         );
 
@@ -1381,7 +1404,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "expr_size::fragment() must mark the generated fragment"
         );
 
@@ -1574,6 +1597,62 @@ mod tests {
             assert!(
                 generated_prefix.contains(declaration),
                 "Generated switch_rewrites fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn select_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/select.rs)\n";
+
+        let expected = include_str!("../optimizations/select.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::select::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/select.egg (generated marker stripped)",
+                    "select::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn select_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/select.rs)\n";
+
+        let fragment = super::select::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "select::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset select_opt)",
+            "(ExprIsPure (Get thn i))",
+            "(ExprIsPure (Get els i))",
+            "(> 10 (Expr-size (Get thn i)))",
+            "(= (TCPair t1 c1) (ExtractedExpr (Get thn i)))",
+            "(= (TCPair t2 c2) (ExtractedExpr (Get els i)))",
+            "(ContextOf if_e ctx)",
+            "(Top (Select) pred (TermSubst ctx inputs t1) (TermSubst ctx inputs t2))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated select fragment must contain {declaration}"
             );
         }
     }
@@ -1970,6 +2049,35 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_select_rules() {
+        let arg_ty = "(TupleT (TNil))";
+        let ctx = "(InFunc \"RLCR\")";
+        let pred = format!("(Const (Bool true) {arg_ty} {ctx})");
+        let inputs = format!("(Empty {arg_ty} {ctx})");
+        let then_ctx = format!("(InIf true {pred} {inputs})");
+        let else_ctx = format!("(InIf false {pred} {inputs})");
+        let then_expr = format!(
+            "(Bop (Add) (Const (Int 1) {arg_ty} {then_ctx}) (Const (Int 2) {arg_ty} {then_ctx}))"
+        );
+        let else_expr = format!(
+            "(Bop (Sub) (Const (Int 9) {arg_ty} {else_ctx}) (Const (Int 4) {arg_ty} {else_ctx}))"
+        );
+        let expected_then =
+            format!("(Bop (Add) (Const (Int 1) {arg_ty} {ctx}) (Const (Int 2) {arg_ty} {ctx}))");
+        let expected_else =
+            format!("(Bop (Sub) (Const (Int 9) {arg_ty} {ctx}) (Const (Int 4) {arg_ty} {ctx}))");
+        let expected = format!("(Top (Select) {pred} {expected_then} {expected_else})");
+        let helpers = crate::schedule::helpers();
+        let program = format!(
+            "{}\n(let __rlcr_if (If {pred} {inputs} (Single {then_expr}) (Single {else_expr})))\n(run-schedule {helpers})\n(run-schedule select_opt)\n(run-schedule {helpers})\n(check (= (Get __rlcr_if 0) {expected}))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2004,6 +2112,8 @@ mod tests {
         let actual = strip_interval_analysis_generated_sections(&actual);
         let expected = strip_switch_rewrites_generated_sections(&expected);
         let actual = strip_switch_rewrites_generated_sections(&actual);
+        let expected = strip_select_generated_sections(&expected);
+        let actual = strip_select_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

@@ -1,0 +1,33 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(SELECT);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/select.rs)\n";
+const SELECT: &str = r#"(ruleset select_opt)
+
+
+;; inlined (Get thn i) makes the query faster ):
+(rule
+       (
+        (= if_e (If pred inputs thn els))
+
+        (ExprIsPure (Get thn i))
+        (ExprIsPure (Get els i))
+        
+        (> 10 (Expr-size (Get thn i))) ; TODO: Tune these size limits
+        (> 10 (Expr-size (Get els i)))
+        (= (TCPair t1 c1) (ExtractedExpr (Get thn i)))
+        (= (TCPair t2 c2) (ExtractedExpr (Get els i)))
+
+        (ContextOf if_e ctx)
+       )
+       (
+        (union (Get if_e i)
+               (Top (Select) pred (TermSubst ctx inputs t1) (TermSubst ctx inputs t2)))
+       )
+       :ruleset select_opt
+)"#;
