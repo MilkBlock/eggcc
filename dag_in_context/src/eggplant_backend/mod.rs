@@ -1,4 +1,5 @@
 mod add_context;
+mod canonicalize;
 mod context_prop;
 mod context_of;
 mod purity_analysis;
@@ -31,7 +32,7 @@ pub(crate) fn prologue() -> String {
         &term_subst::fragment(),
         &context_of::fragment(),
         &subst::fragment(),
-        include_str!("../utility/canonicalize.egg"),
+        &canonicalize::fragment(),
         include_str!("../utility/expr_size.egg"),
         include_str!("../utility/drop_at.egg"),
         include_str!("../interval_analysis.egg"),
@@ -301,6 +302,28 @@ mod tests {
         const SECTION_HEADER: &str =
             ";; Substitution rules allow for substituting some new expression for the argument\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset canon)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_canonicalize_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/canonicalize.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset canon)\n";
+        const NEXT_SECTION_HEADER: &str =
+            ";; Compute the tree size of program, not dag size\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -1181,6 +1204,64 @@ mod tests {
     }
 
     #[test]
+    fn canonicalize_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/canonicalize.rs)\n";
+
+        let expected = include_str!("../utility/canonicalize.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::canonicalize::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/canonicalize.egg (generated marker stripped)",
+                    "canonicalize::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn canonicalize_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/canonicalize.rs)\n";
+
+        let fragment = super::canonicalize::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "canonicalize::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset canon)",
+            "(Bop (GreaterThan) x y)",
+            "(Bop (LessThan) y x)",
+            "(constructor SubTuple",
+            "(SubTuple lhs 0 size)",
+            "(Single (Get expr x))",
+            "(constructor TupleRemoveAt",
+            "(panic \"Index out of bounds for TupleRemoveAt\")",
+            "(constructor TypeListRemoveAt",
+            "(panic \"Index out of bounds for TypeListRemoveAt.\")",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated canonicalize fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -1495,6 +1576,21 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_canonicalize_rules() {
+        let lhs = "(Const (Int 7) (Base (IntT)) (InFunc \"RLCR\"))";
+        let rhs = "(Const (Int 5) (Base (IntT)) (InFunc \"RLCR\"))";
+        let expr = format!("(Bop (GreaterThan) {lhs} {rhs})");
+        let expected = format!("(Bop (LessThan) {rhs} {lhs})");
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n(run-schedule (saturate canon))\n(check (= __rlcr_expr {expected}))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -1519,6 +1615,8 @@ mod tests {
         let actual = strip_context_of_generated_sections(&actual);
         let expected = strip_subst_generated_sections(&expected);
         let actual = strip_subst_generated_sections(&actual);
+        let expected = strip_canonicalize_generated_sections(&expected);
+        let actual = strip_canonicalize_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

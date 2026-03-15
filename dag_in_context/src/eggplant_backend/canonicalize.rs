@@ -1,0 +1,141 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(CANONICALIZE);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/canonicalize.rs)\n";
+const CANONICALIZE: &str = r#"(ruleset canon)
+
+; Commutativity
+(rewrite (Bop (Add) x y) (Bop (Add) y x) :ruleset canon)
+(rewrite (Bop (Mul) x y) (Bop (Mul) y x) :ruleset canon)
+(rewrite (Bop (Eq) x y) (Bop (Eq) y x) :ruleset canon)
+(rewrite (Bop (And) x y) (Bop (And) y x) :ruleset canon)
+(rewrite (Bop (Or) x y) (Bop (Or) y x) :ruleset canon)
+
+; Canonicalize to <
+; x > y ==> y < x
+(rewrite (Bop (GreaterThan) x y) (Bop (LessThan) y x) :ruleset canon)
+
+; x >= y ==> y < x + 1
+; x >= y ==> y - 1 < x
+(rule (
+        (= lhs (Bop (GreaterEq) x y))
+        (HasArgType x ty)
+        (ContextOf lhs ctx)
+      )
+      (
+        (union lhs (Bop (LessThan) y (Bop (Add) x (Const (Int 1) ty ctx))))
+        (union lhs (Bop (LessThan) (Bop (Sub) y (Const (Int 1) ty ctx)) x))
+      )
+      :ruleset canon)
+
+; x <= y ==> x < y + 1
+; x <= y ==> x - 1 < y
+(rule (
+        (= lhs (Bop (LessEq) x y))
+        (HasArgType y ty)
+        (ContextOf lhs ctx)
+      )
+      (
+        (union lhs (Bop (LessThan) x (Bop (Add) y (Const (Int 1) ty ctx))))
+        (union lhs (Bop (LessThan) (Bop (Sub) x (Const (Int 1) ty ctx)) y))
+      )
+      :ruleset canon)
+
+
+; Make Concats right-deep
+(rewrite (Concat (Concat a b) c)
+         (Concat a (Concat b c))
+         :ruleset always-run)
+; Simplify Concat's with empty
+(rewrite (Concat (Empty ty ctx) x)
+         x
+         :ruleset always-run)
+(rewrite (Concat x (Empty ty ctx))
+         x
+         :ruleset always-run)
+
+; Make a tuple that is a sub-range of another tuple
+;                   tuple start len
+(constructor SubTuple (Expr  i64   i64) Expr :unextractable)
+
+(rewrite (SubTuple expr x 0)
+         (Empty ty ctx)
+         :when ((HasArgType expr ty) (ContextOf expr ctx))
+         :ruleset always-run)
+
+(rewrite (SubTuple expr x 1)
+         (Single (Get expr x))
+         :ruleset always-run)
+
+(rewrite (SubTuple expr a b)
+         (Concat (Single (Get expr a)) (SubTuple expr (+ a 1) (- b 1)))
+         :when ((> b 1))
+         :ruleset always-run)
+
+; Some of our rules (like ivt.egg) match on `Concat`.
+; These may be missing if a tuple is used directly (i.e. (DoWhile inputs (If pred thn else))).
+; So add these concats for every region in the database
+(rule ((= lhs (DoWhile inputs body))
+       (= size (tuple-length lhs)))
+      ((union lhs (SubTuple lhs 0 size)))
+      :ruleset always-run)
+(rule ((= lhs (If pred inputs thn els))
+       (= size (tuple-length lhs)))
+      ((union lhs (SubTuple lhs 0 size)))
+      :ruleset always-run)
+(rule ((= lhs (Switch pred inputs bodies))
+       (= size (tuple-length lhs)))
+      ((union lhs (SubTuple lhs 0 size)))
+      :ruleset always-run)
+(rule ((= lhs (Arg ty ctx))
+       (= size (tuple-length lhs)))
+      ((union lhs (SubTuple lhs 0 size)))
+      :ruleset always-run)
+
+; Also figure out what existing expressions are subtuples of other things
+; this helps remove concat layers
+(rule ((Get expr i))
+      ((union (Single (Get expr i))
+              (SubTuple expr i 1)))
+      :ruleset always-run)
+
+(rewrite (Concat (SubTuple expr a b)
+                 (SubTuple expr (+ a b) c))
+         (SubTuple expr a (+ b c))
+         :ruleset always-run)
+;; a subtuple which is the entire tuple is the tuple itself
+;; this removes unecessary layers of concat
+(rewrite (SubTuple expr 0 len)
+         expr
+         :when ((= len (tuple-length expr)))
+         :ruleset always-run)
+
+; Helper functions to remove one element from a tuple or type list
+;                           tuple    idx
+(constructor TupleRemoveAt    (Expr     i64) Expr     :unextractable)
+(rewrite (TupleRemoveAt tuple idx)
+         (Concat (SubTuple tuple 0 idx)
+                 (SubTuple tuple (+ idx 1) (- len (+ idx 1))))
+         :when ((= len (tuple-length tuple)))
+         :ruleset always-run)
+(rule ((TupleRemoveAt tuple idx)
+       (= len (tuple-length tuple))
+       (>= idx len))
+      ((panic "Index out of bounds for TupleRemoveAt")) :ruleset always-run)
+
+(constructor TypeListRemoveAt (TypeList i64) TypeList :unextractable)
+(rule ((TypeListRemoveAt (TNil) _idx))
+      ((panic "Index out of bounds for TypeListRemoveAt.")) :ruleset type-helpers)
+(rewrite (TypeListRemoveAt (TCons x xs) 0)
+         xs
+         :ruleset type-helpers)
+(rewrite (TypeListRemoveAt (TCons x xs) idx)
+         (TCons x (TypeListRemoveAt xs (- idx 1)))
+         :when ((> idx 0))
+         :ruleset type-helpers)"#;
