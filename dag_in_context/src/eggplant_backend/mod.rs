@@ -10,6 +10,7 @@ mod loop_simplify;
 mod loop_unroll;
 mod mem_simple;
 mod memory;
+mod passthrough;
 mod peepholes;
 mod purity_analysis;
 mod rec_to_loop;
@@ -60,7 +61,7 @@ pub(crate) fn prologue() -> String {
         &loop_unroll::fragment(),
         &swap_if::fragment(),
         &rec_to_loop::fragment(),
-        include_str!("../optimizations/passthrough.egg"),
+        &passthrough::fragment(),
         include_str!("../optimizations/loop_strength_reduction.egg"),
         include_str!("../optimizations/ivt.egg"),
         include_str!("../optimizations/conditional_invariant_code_motion.egg"),
@@ -610,6 +611,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/rec_to_loop.rs)\n";
         const SECTION_HEADER: &str = ";; this ruleset depends on swap_if running twice\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset passthrough)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_passthrough_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/passthrough.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset passthrough)\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset loop-strength-reduction)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2274,6 +2296,62 @@ mod tests {
     }
 
     #[test]
+    fn passthrough_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/passthrough.rs)\n";
+
+        let expected = include_str!("../optimizations/passthrough.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::passthrough::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/passthrough.egg (generated marker stripped)",
+                    "passthrough::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn passthrough_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/passthrough.rs)\n";
+
+        let fragment = super::passthrough::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "passthrough::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset passthrough)",
+            "(= loop (DoWhile inputs pred-outputs))",
+            "(PureType lhs_ty)",
+            "(= switch (Switch pred inputs branches))",
+            "(= if (If pred inputs then_ else_))",
+            "(ruleset state-edge-passthrough)",
+            "(union (Get           if i) pred)",
+            "(union (Get           if i) (Uop (Not) pred))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated passthrough fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2978,6 +3056,36 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_passthrough_rules() -> crate::Result {
+        use crate::ast::*;
+
+        let build = get(
+            tif(
+                less_than(arg(), int(5)),
+                empty(),
+                single(ttrue()),
+                single(tfalse()),
+            ),
+            0,
+        );
+        let check = less_than(arg(), int(5));
+
+        let (build, build_cache) = build.to_program(base(intt()), base(boolt())).add_context();
+        let (check, check_cache) = check.to_program(base(intt()), base(boolt())).add_context();
+        crate::egglog_test(
+            &format!("(let b {build})\n{}", build_cache.get_unions()),
+            &format!(
+                "(let c {check})\n{} (check (= b c))",
+                check_cache.get_unions()
+            ),
+            vec![build, check],
+            intv(3),
+            val_bool(true),
+            vec![],
+        )
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3030,6 +3138,8 @@ mod tests {
         let actual = strip_swap_if_generated_sections(&actual);
         let expected = strip_rec_to_loop_generated_sections(&expected);
         let actual = strip_rec_to_loop_generated_sections(&actual);
+        let expected = strip_passthrough_generated_sections(&expected);
+        let actual = strip_passthrough_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
