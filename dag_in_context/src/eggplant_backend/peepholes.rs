@@ -1,0 +1,67 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(PEEPHOLES);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/peepholes.rs)\n";
+const PEEPHOLES: &str = r#"; Simple rewrites that don't do a ton with control flow.
+
+(ruleset peepholes)
+
+(rewrite (Bop (Mul) (Const (Int 0) ty ctx) e) (Const (Int 0) ty ctx) :ruleset peepholes)
+(rewrite (Bop (Mul) e (Const (Int 0) ty ctx)) (Const (Int 0) ty ctx) :ruleset peepholes)
+(rewrite (Bop (Mul) (Const (Int 1) ty ctx) e) e :ruleset peepholes)
+(rewrite (Bop (Mul) e (Const (Int 1) ty ctx)) e :ruleset peepholes)
+(rewrite (Bop (Add) (Const (Int 0) ty ctx) e) e :ruleset peepholes)
+(rewrite (Bop (Add) e (Const (Int 0) ty ctx) ) e :ruleset peepholes)
+
+(rewrite (Bop (Mul) (Const (Int j) ty ctx) (Const (Int i) ty ctx)) (Const (Int (* i j)) ty ctx) :ruleset peepholes)
+(rewrite (Bop (Add) (Const (Int j) ty ctx) (Const (Int i) ty ctx)) (Const (Int (+ i j)) ty ctx) :ruleset peepholes)
+
+(rewrite (Bop (And) (Const (Bool true) ty ctx) e) e :ruleset peepholes)
+(rewrite (Bop (And) e (Const (Bool true) ty ctx)) e :ruleset peepholes)
+(rewrite (Bop (And) (Const (Bool false) ty ctx) e) (Const (Bool false) ty ctx) :ruleset peepholes)
+(rewrite (Bop (And) e (Const (Bool false) ty ctx)) (Const (Bool false) ty ctx) :ruleset peepholes)
+(rewrite (Bop (Or) (Const (Bool false) ty ctx) e) e :ruleset peepholes)
+(rewrite (Bop (Or) e (Const (Bool false) ty ctx)) e :ruleset peepholes)
+(rewrite (Bop (Or) (Const (Bool true) ty ctx) e) (Const (Bool true) ty ctx) :ruleset peepholes)
+(rewrite (Bop (Or) e (Const (Bool true) ty ctx)) (Const (Bool true) ty ctx) :ruleset peepholes)
+
+(rule (
+        (= expr (Bop (Sub) x x))
+        (HasArgType expr ty)
+        (ContextOf expr ctx)
+      )
+      ((union expr (Const (Int 0) ty ctx)))
+      :ruleset peepholes)
+
+; (x - y) + z => x + (z - y)
+(rewrite (Bop (Add) (Bop (Sub) x y) z) (Bop (Add) x (Bop (Sub) z y)) :ruleset peepholes)
+
+; (a + b) - c => a + (b - c)
+(rewrite (Bop (Sub) (Bop (Add) a b) c) (Bop (Add) a (Bop (Sub) b c)) :ruleset peepholes)
+
+; (a * x) + a => a * (x + 1)
+(rule (
+        (= expr (Bop (Add) (Bop (Mul) a x) a))
+        (HasArgType expr ty)
+        (ContextOf expr ctx)
+      )
+      ((union expr (Bop (Mul) a (Bop (Add) x (Const (Int 1) ty ctx)))))
+      :ruleset peepholes)
+
+(rewrite (Top (Select) pred x x) x :ruleset peepholes)
+
+; constant fold `(x + const1) + const2` even when x is not constant
+(rewrite (Bop (Add) (Bop (Add) x (Const (Int i) ty ctx)) (Const (Int j) ty ctx))
+         (Bop (Add) x (Const (Int (+ i j)) ty ctx))
+         :ruleset peepholes)
+
+; ptradd(ptradd(p, x), y) => ptradd(p, x + y)
+(rewrite (Bop (PtrAdd) (Bop (PtrAdd) p x) y)
+         (Bop (PtrAdd) p (Bop (Add) x y))
+         :ruleset peepholes)"#;

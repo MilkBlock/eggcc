@@ -5,6 +5,7 @@ mod context_prop;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
+mod peepholes;
 mod purity_analysis;
 mod schema;
 mod schema_dsl;
@@ -43,7 +44,7 @@ pub(crate) fn prologue() -> String {
         &interval_analysis::fragment(),
         &switch_rewrites::fragment(),
         &select::fragment(),
-        include_str!("../optimizations/peepholes.egg"),
+        &peepholes::fragment(),
         &crate::optimizations::memory::rules(),
         include_str!("../optimizations/memory.egg"),
         include_str!("../optimizations/mem_simple.egg"),
@@ -434,6 +435,27 @@ mod tests {
         const SECTION_HEADER: &str = "(ruleset select_opt)\n";
         const NEXT_SECTION_HEADER: &str =
             "; Simple rewrites that don't do a ton with control flow.\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_peepholes_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/peepholes.rs)\n";
+        const SECTION_HEADER: &str = "; Simple rewrites that don't do a ton with control flow.\n";
+        const NEXT_SECTION_HEADER: &str = "(datatype IntOrInfinity\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -1658,6 +1680,63 @@ mod tests {
     }
 
     #[test]
+    fn peepholes_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/peepholes.rs)\n";
+
+        let expected = include_str!("../optimizations/peepholes.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::peepholes::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/peepholes.egg (generated marker stripped)",
+                    "peepholes::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn peepholes_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/peepholes.rs)\n";
+
+        let fragment = super::peepholes::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "peepholes::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "; Simple rewrites that don't do a ton with control flow.",
+            "(ruleset peepholes)",
+            "(Bop (Mul) (Const (Int 0) ty ctx) e)",
+            "(Bop (Sub) x x)",
+            "(union expr (Const (Int 0) ty ctx))",
+            "(Bop (Add) (Bop (Sub) x y) z)",
+            "(Bop (Mul) a (Bop (Add) x (Const (Int 1) ty ctx)))",
+            "(Top (Select) pred x x)",
+            "(Bop (PtrAdd) p (Bop (Add) x y))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated peepholes fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2078,6 +2157,22 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_peepholes_rules() {
+        let ty = "(Base (StateT))";
+        let ctx = "(InFunc \"RLCR\")";
+        let expr = format!("(Bop (Sub) (Const (Int 7) {ty} {ctx}) (Const (Int 7) {ty} {ctx}))");
+        let expected = format!("(Const (Int 0) {ty} {ctx})");
+        let schedule = crate::schedule::types_and_indexing();
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n(run-schedule {schedule})\n(run-schedule peepholes)\n(check (= __rlcr_expr {expected}))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2114,6 +2209,8 @@ mod tests {
         let actual = strip_switch_rewrites_generated_sections(&actual);
         let expected = strip_select_generated_sections(&expected);
         let actual = strip_select_generated_sections(&actual);
+        let expected = strip_peepholes_generated_sections(&expected);
+        let actual = strip_peepholes_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
