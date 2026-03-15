@@ -6,6 +6,7 @@ mod drop_at;
 mod expr_size;
 mod interval_analysis;
 mod loop_invariant;
+mod loop_simplify;
 mod mem_simple;
 mod memory;
 mod peepholes;
@@ -52,7 +53,7 @@ pub(crate) fn prologue() -> String {
         &memory::fragment(),
         &mem_simple::fragment(),
         &loop_invariant::rules(),
-        include_str!("../optimizations/loop_simplify.egg"),
+        &loop_simplify::fragment(),
         include_str!("../optimizations/loop_unroll.egg"),
         include_str!("../optimizations/swap_if.egg"),
         include_str!("../optimizations/rec_to_loop.egg"),
@@ -539,6 +540,22 @@ mod tests {
         stripped = stripped.replace(
             &format!("\n\n{SECTION_HEADER}"),
             &format!("\n{SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_loop_simplify_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_simplify.rs)\n";
+        const NEXT_SECTION_HEADER: &str = ";; Some simple simplifications of loops\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
         );
         stripped
     }
@@ -1987,6 +2004,41 @@ mod tests {
     }
 
     #[test]
+    fn loop_simplify_fragment_matches_empty_file_with_generated_marker_only() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_simplify.rs)\n";
+
+        let expected = include_str!("../optimizations/loop_simplify.egg");
+        let actual = super::loop_simplify::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "");
+
+        assert!(
+            expected.is_empty(),
+            "optimizations/loop_simplify.egg must stay empty until real rules are migrated"
+        );
+        assert!(
+            actual.is_empty(),
+            "loop_simplify::fragment() must only emit the generated marker while the source file is empty"
+        );
+        assert_eq!(
+            expected, actual,
+            "loop_simplify::fragment() must match the empty source file once the generated marker is stripped"
+        );
+    }
+
+    #[test]
+    fn loop_simplify_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_simplify.rs)\n";
+
+        let fragment = super::loop_simplify::fragment();
+        assert_eq!(
+            fragment, GENERATED_MARKER,
+            "loop_simplify::fragment() must be marker-only while optimizations/loop_simplify.egg is empty"
+        );
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2581,6 +2633,8 @@ mod tests {
         let actual = strip_mem_simple_generated_sections(&actual);
         let expected = strip_loop_invariant_generated_sections(&expected);
         let actual = strip_loop_invariant_generated_sections(&actual);
+        let expected = strip_loop_simplify_generated_sections(&expected);
+        let actual = strip_loop_simplify_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
