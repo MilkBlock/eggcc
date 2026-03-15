@@ -1,7 +1,7 @@
 mod add_context;
 mod canonicalize;
-mod context_prop;
 mod context_of;
+mod context_prop;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
@@ -9,6 +9,7 @@ mod purity_analysis;
 mod schema;
 mod schema_dsl;
 mod subst;
+mod switch_rewrites;
 mod term_subst;
 mod terms;
 mod type_analysis;
@@ -39,7 +40,7 @@ pub(crate) fn prologue() -> String {
         &expr_size::fragment(),
         &drop_at::fragment(),
         &interval_analysis::fragment(),
-        include_str!("../optimizations/switch_rewrites.egg"),
+        &switch_rewrites::fragment(),
         include_str!("../optimizations/select.egg"),
         include_str!("../optimizations/peepholes.egg"),
         &crate::optimizations::memory::rules(),
@@ -325,8 +326,7 @@ mod tests {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/canonicalize.rs)\n";
         const SECTION_HEADER: &str = "(ruleset canon)\n";
-        const NEXT_SECTION_HEADER: &str =
-            ";; Compute the tree size of program, not dag size\n";
+        const NEXT_SECTION_HEADER: &str = ";; Compute the tree size of program, not dag size\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -347,8 +347,7 @@ mod tests {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/expr_size.rs)\n";
         const SECTION_HEADER: &str = ";; Compute the tree size of program, not dag size\n";
-        const NEXT_SECTION_HEADER: &str =
-            ";; Like Subst but for dropping inputs to a region\n";
+        const NEXT_SECTION_HEADER: &str = ";; Like Subst but for dropping inputs to a region\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -391,6 +390,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/interval_analysis.rs)\n";
         const SECTION_HEADER: &str = "(ruleset interval-analysis)\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset switch_rewrite)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_switch_rewrites_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/switch_rewrites.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset switch_rewrite)\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset select_opt)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -1203,9 +1223,7 @@ mod tests {
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
 
-        let expected = include_str!("../utility/subst.egg")
-            .trim_end()
-            .to_string();
+        let expected = include_str!("../utility/subst.egg").trim_end().to_string();
         let actual = super::subst::fragment();
         let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
 
@@ -1419,7 +1437,7 @@ mod tests {
         let generated_prefix = fragment.as_str();
 
         assert!(
-            generated_prefix.contains(GENERATED_MARKER),
+            generated_prefix.starts_with(GENERATED_MARKER),
             "drop_at::fragment() must mark the generated fragment"
         );
 
@@ -1498,6 +1516,64 @@ mod tests {
             assert!(
                 generated_prefix.contains(declaration),
                 "Generated interval_analysis fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
+    fn switch_rewrites_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/switch_rewrites.rs)\n";
+
+        let expected = include_str!("../optimizations/switch_rewrites.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::switch_rewrites::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/switch_rewrites.egg (generated marker stripped)",
+                    "switch_rewrites::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn switch_rewrites_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/switch_rewrites.rs)\n";
+
+        let fragment = super::switch_rewrites::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "switch_rewrites::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset switch_rewrite)",
+            "(ruleset always-switch-rewrite)",
+            "(union (Get if_e k) (Bop (Smin) a b))",
+            "(union (Get if_e k) (Bop (Smax) a b))",
+            "(union (Get if_e k) (Top (Select) pred a b))",
+            "(union (Get if_e i) (Top (Select) pred (Const x ty ctx) (Const y ty ctx)))",
+            "(union (Get if_e k) (Top (Select) pred a (Const (Int y) ty ctx)))",
+            "(union (Get if_e k) (Top (Select) pred (Const (Int y) ty ctx) b))",
+            "(let outer_ins (Concat (Single b) ins))",
+            "(let inner (If inner_pred sub_arg_false inner_X inner_Y))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated switch_rewrites fragment must contain {declaration}"
             );
         }
     }
@@ -1875,6 +1951,25 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_switch_rewrite_rules() {
+        let tuple_ty = "(TupleT (TCons (IntT) (TCons (IntT) (TNil))))";
+        let left = "(Const (Int 3) (Base (IntT)) (InFunc \"RLCR\"))";
+        let right = "(Const (Int 5) (Base (IntT)) (InFunc \"RLCR\"))";
+        let pred = format!("(Bop (LessThan) {left} {right})");
+        let inputs = format!("(Concat (Single {left}) (Single {right}))");
+        let then_branch = format!("(Single (Get (Arg {tuple_ty} (InIf true {pred} {inputs})) 0))");
+        let else_branch = format!("(Single (Get (Arg {tuple_ty} (InIf false {pred} {inputs})) 1))");
+        let schedule = crate::schedule::types_and_indexing();
+        let program = format!(
+            "{}\n(let __rlcr_if (If {pred} {inputs} {then_branch} {else_branch}))\n(run-schedule {schedule})\n(run-schedule (saturate switch_rewrite))\n(check (= (Get __rlcr_if 0) (Bop (Smin) {left} {right})))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -1907,6 +2002,8 @@ mod tests {
         let actual = strip_drop_at_generated_sections(&actual);
         let expected = strip_interval_analysis_generated_sections(&expected);
         let actual = strip_interval_analysis_generated_sections(&actual);
+        let expected = strip_switch_rewrites_generated_sections(&expected);
+        let actual = strip_switch_rewrites_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

@@ -1,0 +1,164 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(SWITCH_REWRITES);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/switch_rewrites.rs)\n";
+const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
+(ruleset always-switch-rewrite)
+
+; if a < b then a else b ~~> (min a b)
+(rule (
+       (= pred (Bop (LessThan) a b))
+       (= if_e (If pred inputs thn els))
+       ; a is an input to the if region
+       (= a (Get inputs i))
+       ; b is an input to the if region
+       (= b (Get inputs j))
+       ; if a < b then a else b
+       (= (Get thn k) (Get (Arg ty (InIf true pred inputs)) i))
+       (= (Get els k) (Get (Arg ty (InIf false pred inputs)) j))
+      )
+      ((union (Get if_e k) (Bop (Smin) a b)))
+      :ruleset switch_rewrite)
+
+; if a < b then b else a ~~> (max a b)
+(rule (
+       (= pred (Bop (LessThan) a b))
+       (= if_e (If pred inputs thn els))
+       ; a is an input to the if region
+       (= a (Get inputs i))
+       ; b is an input to the if region
+       (= b (Get inputs j))
+       ; if a < b then b else a
+       (= (Get thn k) (Get (Arg ty (InIf true pred inputs)) j))
+       (= (Get els k) (Get (Arg ty (InIf false pred inputs)) i))
+      )
+      ((union (Get if_e k) (Bop (Smax) a b)))
+      :ruleset switch_rewrite) 
+
+; if pred then a else b ~~> (select pred a b)
+; where a and b are inputs to the region
+(rule (
+       (= if_e (If pred inputs thn els))
+       (= a (Get inputs i))
+       (= b (Get inputs j))
+
+       ; if pred then a else b
+       (= (Get thn k) (Get (Arg ty (InIf true pred inputs)) i))
+       (= (Get els k) (Get (Arg ty (InIf false pred inputs)) j))
+
+       ; If i = j, then the arg is just passed through the if, and we
+       ; don't need a select. This will get handled by the passthrough rules.
+       (!= i j)
+       )
+       (
+       (union (Get if_e k) (Top (Select) pred a b))
+       )
+       :ruleset switch_rewrite)
+
+(rule (
+       (= if_e (If pred inputs thn els))
+       (ContextOf if_e ctx)
+       (HasArgType if_e ty)
+       (= (Get thn i) (Const x _ty (InIf true pred inputs)))
+       (= (Get els i) (Const y _ty (InIf false pred inputs)))
+      )
+      ((union (Get if_e i) (Top (Select) pred (Const x ty ctx) (Const y ty ctx))))
+      :ruleset switch_rewrite)
+
+; if pred then A else Const -> select pred A Const
+; where A is an input to the region
+(rule (
+       (= if_e (If pred inputs thn els))
+       (ContextOf if_e ctx)
+       (HasArgType if_e ty)
+
+       ; input to the if
+       (= a (Get inputs i))
+       (= (Get thn k) (Get (Arg _ty (InIf true pred inputs)) i))
+
+       (= els_out (Get els k))
+       (= (IntB y) (lo-bound els_out))
+       (= (IntB y) (hi-bound els_out))
+       )
+       (
+       (union (Get if_e k) (Top (Select) pred a (Const (Int y) ty ctx)))
+       )
+       :ruleset switch_rewrite
+)
+
+; if pred then Const else B -> select pred Const B
+; where B is an input to the region
+(rule (
+       (= if_e (If pred inputs thn els))
+       (ContextOf if_e ctx)
+       (HasArgType if_e ty)
+
+       (= thn_out (Get thn k))
+       (= (IntB y) (lo-bound thn_out))
+       (= (IntB y) (hi-bound thn_out))
+
+       ; input to the if
+       (= b (Get inputs i))
+       (= (Get els k) (Get (Arg _ty (InIf false pred inputs)) i))
+      )
+      (
+       (union (Get if_e k) (Top (Select) pred (Const (Int y) ty ctx) b))
+      )
+      :ruleset switch_rewrite
+)
+
+; if (a and b) X Y ~~> if a (if b X Y) Y
+(rule ((= lhs (If (Bop (And) a b) ins X Y))
+       (HasType ins (TupleT ins_ty))
+       (= len (tuple-length ins))
+       
+       ;; For early returns, Y might be fairly large
+       ;; limit the size we match on here
+       (< (Expr-size Y) 100))
+
+      ((let outer_ins (Concat (Single b) ins))
+       (let outer_ins_ty (TupleT (TCons (BoolT) ins_ty)))
+
+       (let inner_pred    (Get      (Arg outer_ins_ty (InIf true  a outer_ins)) 0))
+       (let sub_arg_true  (SubTuple (Arg outer_ins_ty (InIf true  a outer_ins)) 1 len))
+       (let sub_arg_false (SubTuple (Arg outer_ins_ty (InIf false a outer_ins)) 1 len))
+
+       (let inner_Y (AddContext (InIf false inner_pred sub_arg_true) Y))
+       (let outer_Y (Subst      (InIf false a          outer_ins) sub_arg_false Y))
+
+       (let inner (If inner_pred sub_arg_true X inner_Y))
+       (union lhs (If a          outer_ins    inner   outer_Y)))
+
+       :ruleset switch_rewrite)
+
+; if (a or b) X Y ~~> if a X (if b X Y)
+(rule ((= lhs (If (Bop (Or) a b) ins X Y))
+       (HasType ins (TupleT ins_ty))
+       (= len (tuple-length ins))
+       
+       ;; limit the size, since X and Y get new contexts
+       (< (Expr-size X) 100)
+       (< (Expr-size Y) 100)
+       )
+
+      ((let outer_ins (Concat (Single b) ins))
+       (let outer_ins_ty (TupleT (TCons (BoolT) ins_ty)))
+
+       (let inner_pred    (Get      (Arg outer_ins_ty (InIf false a outer_ins)) 0))
+       (let sub_arg_true  (SubTuple (Arg outer_ins_ty (InIf true  a outer_ins)) 1 len))
+       (let sub_arg_false (SubTuple (Arg outer_ins_ty (InIf false a outer_ins)) 1 len))
+
+       (let outer_X (Subst      (InIf true  a          outer_ins) sub_arg_true X))
+       (let inner_X (AddContext (InIf true  inner_pred sub_arg_false) X))
+       (let inner_Y (AddContext (InIf false inner_pred sub_arg_false) Y))
+
+       (let inner (If inner_pred sub_arg_false inner_X inner_Y))
+       (union lhs (If a          outer_ins     outer_X inner  )))
+
+       :ruleset switch_rewrite)"#;
