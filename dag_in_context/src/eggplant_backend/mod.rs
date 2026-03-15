@@ -2,6 +2,7 @@ mod add_context;
 mod canonicalize;
 mod context_prop;
 mod context_of;
+mod drop_at;
 mod expr_size;
 mod purity_analysis;
 mod schema;
@@ -35,7 +36,7 @@ pub(crate) fn prologue() -> String {
         &subst::fragment(),
         &canonicalize::fragment(),
         &expr_size::fragment(),
-        include_str!("../utility/drop_at.egg"),
+        &drop_at::fragment(),
         include_str!("../interval_analysis.egg"),
         include_str!("../optimizations/switch_rewrites.egg"),
         include_str!("../optimizations/select.egg"),
@@ -347,6 +348,27 @@ mod tests {
         const SECTION_HEADER: &str = ";; Compute the tree size of program, not dag size\n";
         const NEXT_SECTION_HEADER: &str =
             ";; Like Subst but for dropping inputs to a region\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_drop_at_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/drop_at.rs)\n";
+        const SECTION_HEADER: &str = ";; Like Subst but for dropping inputs to a region\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset interval-analysis)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -1341,6 +1363,66 @@ mod tests {
     }
 
     #[test]
+    fn drop_at_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/drop_at.rs)\n";
+
+        let expected = include_str!("../utility/drop_at.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::drop_at::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/drop_at.egg (generated marker stripped)",
+                    "drop_at::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn drop_at_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/drop_at.rs)\n";
+
+        let fragment = super::drop_at::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.contains(GENERATED_MARKER),
+            "drop_at::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset drop)",
+            "(ruleset apply-drop-unions)",
+            "(ruleset cleanup-drop)",
+            "(constructor DropAt",
+            "(constructor DelayedDropUnion",
+            "(constructor DropAtInternal",
+            "(TypeListRemoveAt oldty idx)",
+            "(Get (Arg newty newctx) (- i 1))",
+            "(DropAtInternal newty newctx idx c1)",
+            "(subsume (DropAt newctx idx in))",
+            "(subsume (DropAtInternal newty newctx idx in))",
+            "(subsume (DelayedDropUnion lhs rhs))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated drop_at fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -1683,6 +1765,21 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_drop_at_rules() {
+        let ctx = "(InFunc \"RLCR\")";
+        let input = "(Get (Arg (TupleT (TCons (IntT) (TCons (BoolT) (TNil)))) (InFunc \"OLD\")) 1)";
+        let expected = "(Get (Arg (TupleT (TCons (BoolT) (TNil))) (InFunc \"RLCR\")) 0)";
+        let schedule = "(saturate (saturate type-helpers) type-analysis)";
+        let program = format!(
+            "{}\n(let __rlcr_input {input})\n(let __rlcr_drop (DropAt {ctx} 0 __rlcr_input))\n(run-schedule {schedule})\n(run-schedule (saturate is-resolved))\n(run-schedule (saturate drop))\n(run-schedule apply-drop-unions)\n(run-schedule cleanup-drop)\n(run-schedule {schedule})\n(check (= __rlcr_drop {expected}))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -1711,6 +1808,8 @@ mod tests {
         let actual = strip_canonicalize_generated_sections(&actual);
         let expected = strip_expr_size_generated_sections(&expected);
         let actual = strip_expr_size_generated_sections(&actual);
+        let expected = strip_drop_at_generated_sections(&expected);
+        let actual = strip_drop_at_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
