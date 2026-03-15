@@ -5,6 +5,7 @@ mod context_prop;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
+mod memory;
 mod peepholes;
 mod purity_analysis;
 mod schema;
@@ -46,7 +47,7 @@ pub(crate) fn prologue() -> String {
         &select::fragment(),
         &peepholes::fragment(),
         &crate::optimizations::memory::rules(),
-        include_str!("../optimizations/memory.egg"),
+        &memory::fragment(),
         include_str!("../optimizations/mem_simple.egg"),
         &crate::optimizations::loop_invariant::rules().join("\n"),
         include_str!("../optimizations/loop_simplify.egg"),
@@ -469,6 +470,37 @@ mod tests {
             &format!("\n\n{NEXT_SECTION_HEADER}"),
             &format!("\n{NEXT_SECTION_HEADER}"),
         );
+        stripped
+    }
+
+    fn strip_memory_generated_sections(program: &str) -> String {
+        const RAW_START: &str = "(sort ExprSetPrim (Set Expr))\n";
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/memory.rs)\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset mem-simple)\n";
+
+        let start = program
+            .find(GENERATED_MARKER)
+            .or_else(|| program.find(RAW_START))
+            .expect("memory.egg fragment must contain the generated marker or raw start");
+        let end = program[start..]
+            .find(NEXT_SECTION_HEADER)
+            .map(|idx| idx + start)
+            .unwrap_or(program.len());
+
+        let mut stripped = String::new();
+        stripped.push_str(&program[..start]);
+        stripped.push_str(&program[end..]);
+
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+
         stripped
     }
 
@@ -1737,6 +1769,69 @@ mod tests {
     }
 
     #[test]
+    fn memory_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/memory.rs)\n";
+
+        let expected = include_str!("../optimizations/memory.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::memory::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/memory.egg (generated marker stripped)",
+                    "memory::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn memory_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/memory.rs)\n";
+
+        let fragment = super::memory::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "memory::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(sort ExprSetPrim (Set Expr))",
+            "(datatype ExprSet (ES ExprSetPrim))",
+            "(relation ExprSet-contains (ExprSet Expr))",
+            "(datatype Pointees",
+            "(relation Resolved-Pointees (Pointees))",
+            "(constructor PointsToCells (Expr Pointees)     Pointees :unextractable)",
+            "(rewrite (PointsToCells (If c inputs t e) aps)",
+            "(constructor PointsToCellsAtIter (Pointees Expr Expr i64) Pointees)",
+            "(set (PointsToCells (DoWhile inputs pred-body) aps)",
+            "(relation DemandDontAlias (Expr Expr Pointees))",
+            "(relation DontAlias (Expr Expr Pointees))",
+            "(DemandDontAlias addr otheraddr (TypeToPointees argty))",
+            "(constructor PointsToExpr (Expr           Expr) Expr :unextractable)",
+            "(set (PointsToExpr (Get f 1) ptr) (Get f 0))",
+            ":ruleset memory)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated memory fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2173,6 +2268,31 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_memory_rules() {
+        use crate::ast::*;
+        use crate::schema::{BaseType, Type};
+
+        let one = int_ty(1, Type::Base(BaseType::IntT));
+        let two = int(2).with_arg_types(tuplet!(statet()), Type::Base(intt()));
+        let orig_state = get(arg_ty(tuplet!(statet())), 0);
+        let ptr_and_state = alloc(0, one, orig_state.clone(), pointert(intt()));
+        let ptr = get(ptr_and_state.clone(), 0);
+        let state = get(ptr_and_state, 1);
+        let state = write(ptr.clone(), two.clone(), state);
+        let val_and_state = load(ptr, state);
+        let val = get(val_and_state.clone(), 0);
+        let state = get(val_and_state, 1);
+        let res = tprint(val, state);
+        let program = format!(
+            "{}\n{res}\n(run-schedule\n    (repeat 6\n        (saturate\n            always-run\n            memory-helpers)\n        memory))\n(check (= {res} (Bop (Print) {two} rest)))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2211,6 +2331,8 @@ mod tests {
         let actual = strip_select_generated_sections(&actual);
         let expected = strip_peepholes_generated_sections(&expected);
         let actual = strip_peepholes_generated_sections(&actual);
+        let expected = strip_memory_generated_sections(&expected);
+        let actual = strip_memory_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
