@@ -16,6 +16,7 @@ mod schema;
 mod schema_dsl;
 mod select;
 mod subst;
+mod swap_if;
 mod switch_rewrites;
 mod term_subst;
 mod terms;
@@ -56,7 +57,7 @@ pub(crate) fn prologue() -> String {
         &loop_invariant::rules(),
         &loop_simplify::fragment(),
         &loop_unroll::fragment(),
-        include_str!("../optimizations/swap_if.egg"),
+        &swap_if::fragment(),
         include_str!("../optimizations/rec_to_loop.egg"),
         include_str!("../optimizations/passthrough.egg"),
         include_str!("../optimizations/loop_strength_reduction.egg"),
@@ -566,6 +567,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/loop_unroll.rs)\n";
         const SECTION_HEADER: &str = ";; Some simple simplifications of loops\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset swap-if)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_swap_if_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/swap_if.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset swap-if)\n";
+        const NEXT_SECTION_HEADER: &str = ";; this ruleset depends on swap_if running twice\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2118,6 +2140,61 @@ mod tests {
     }
 
     #[test]
+    fn swap_if_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/swap_if.rs)\n";
+
+        let expected = include_str!("../optimizations/swap_if.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::swap_if::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/swap_if.egg (generated marker stripped)",
+                    "swap_if::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn swap_if_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/swap_if.rs)\n";
+
+        let fragment = super::swap_if::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "swap_if::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset swap-if)",
+            "(= lhs (If pred inputs then else))",
+            "(union lhs (If (Uop (Not) pred) inputs else then))",
+            "(= (tuple-length then) 2)",
+            "(= (tuple-length else) 2)",
+            "(Concat (Single (Get lhs 1)) (Single (Get lhs 0)))",
+            ":ruleset swap-if)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated swap_if fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2700,6 +2777,27 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_swap_if_rules() {
+        let arg_ty = "(TupleT (TNil))";
+        let ctx = "(InFunc \"RLCR\")";
+        let pred = format!("(Const (Bool true) (Base (BoolT)) {ctx})");
+        let inputs = format!("(Empty {arg_ty} {ctx})");
+        let then_ctx = format!("(InIf true {pred} {inputs})");
+        let else_ctx = format!("(InIf false {pred} {inputs})");
+        let then_branch = format!("(Single (Const (Int 1) (Base (IntT)) {then_ctx}))");
+        let else_branch = format!("(Single (Const (Int 2) (Base (IntT)) {else_ctx}))");
+        let if_expr = format!("(If {pred} {inputs} {then_branch} {else_branch})");
+        let expected = format!("(If (Uop (Not) {pred}) {inputs} {else_branch} {then_branch})");
+        let program = format!(
+            "{}\n(let __rlcr_if {if_expr})\n(run-schedule swap-if)\n(check (= __rlcr_if {expected}))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2748,6 +2846,8 @@ mod tests {
         let actual = strip_loop_simplify_generated_sections(&actual);
         let expected = strip_loop_unroll_generated_sections(&expected);
         let actual = strip_loop_unroll_generated_sections(&actual);
+        let expected = strip_swap_if_generated_sections(&expected);
+        let actual = strip_swap_if_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
