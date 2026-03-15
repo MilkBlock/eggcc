@@ -12,6 +12,7 @@ mod mem_simple;
 mod memory;
 mod peepholes;
 mod purity_analysis;
+mod rec_to_loop;
 mod schema;
 mod schema_dsl;
 mod select;
@@ -58,7 +59,7 @@ pub(crate) fn prologue() -> String {
         &loop_simplify::fragment(),
         &loop_unroll::fragment(),
         &swap_if::fragment(),
-        include_str!("../optimizations/rec_to_loop.egg"),
+        &rec_to_loop::fragment(),
         include_str!("../optimizations/passthrough.egg"),
         include_str!("../optimizations/loop_strength_reduction.egg"),
         include_str!("../optimizations/ivt.egg"),
@@ -588,6 +589,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/swap_if.rs)\n";
         const SECTION_HEADER: &str = "(ruleset swap-if)\n";
         const NEXT_SECTION_HEADER: &str = ";; this ruleset depends on swap_if running twice\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_rec_to_loop_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/rec_to_loop.rs)\n";
+        const SECTION_HEADER: &str = ";; this ruleset depends on swap_if running twice\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset passthrough)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2195,6 +2217,63 @@ mod tests {
     }
 
     #[test]
+    fn rec_to_loop_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/rec_to_loop.rs)\n";
+
+        let expected = include_str!("../optimizations/rec_to_loop.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::rec_to_loop::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/rec_to_loop.egg (generated marker stripped)",
+                    "rec_to_loop::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn rec_to_loop_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/rec_to_loop.rs)\n";
+
+        let fragment = super::rec_to_loop::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "rec_to_loop::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset rec-to-loop)",
+            "(Function name in out body)",
+            "(= body (If pred always-runs (Call name rec_case) base-case))",
+            "(relation Accum-Bop (BinaryOp i64 BinaryOp))",
+            "(Accum-Bop (Add) 0 (Add))",
+            "(Accum-Bop (Sub) 0 (Add))",
+            "(Accum-Bop (Mul) 1 (Mul))",
+            "(= then-case",
+            ":ruleset rec-to-loop)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated rec_to_loop fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2798,6 +2877,107 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_rec_to_loop_rules() {
+        fn run_and_extract(program: &crate::schema::TreeProgram, egglog_program: &str) -> String {
+            let mut egraph = egglog::EGraph::default();
+            egraph.parse_and_run_program(None, egglog_program).unwrap();
+
+            let (serialized, unextractables) =
+                crate::greedy_dag_extractor::serialized_egraph(egraph);
+
+            let mut termdag = egglog::TermDag::default();
+            let extracted = crate::greedy_dag_extractor::greedy_dag_extract(
+                program,
+                program.fns(),
+                serialized,
+                unextractables,
+                &mut termdag,
+                crate::greedy_dag_extractor::DefaultCostModel,
+                true,
+                false,
+            )
+            .1;
+
+            extracted.add_dummy_ctx().0.to_string()
+        }
+
+        let tuple_int_state = crate::ast::tuplet!(crate::ast::intt(), crate::ast::statet());
+        let always_runs = crate::ast::parallel!(crate::ast::getat(0), crate::ast::getat(1));
+        let pred =
+            crate::ast::less_than(crate::ast::get(always_runs.clone(), 0), crate::ast::int(5));
+        let rec_case = crate::ast::parallel!(
+            crate::ast::add(crate::ast::get(always_runs.clone(), 0), crate::ast::int(1)),
+            crate::ast::get(always_runs.clone(), 1)
+        );
+        let f = crate::ast::function(
+            "f",
+            tuple_int_state.clone(),
+            tuple_int_state.clone(),
+            crate::ast::tif(
+                pred,
+                always_runs.clone(),
+                crate::ast::call("f", rec_case),
+                always_runs,
+            ),
+        );
+        let main = crate::ast::function(
+            "main",
+            tuple_int_state.clone(),
+            tuple_int_state,
+            crate::ast::call("f", crate::ast::arg()),
+        );
+        let program = crate::ast::program!(main, f);
+
+        let helpers = crate::schedule::helpers();
+        let schedule = format!(
+            "
+(run-schedule
+  (repeat 2
+      {helpers}
+      swap-if)
+  {helpers}
+  rec-to-loop
+  {helpers})"
+        );
+        let egglog_prog =
+            crate::build_program(&program, None, &program.fns(), &schedule, None, true);
+
+        let suffix_anchor = "(relation InlinedCall (String Expr))";
+        let suffix_start = egglog_prog.find(suffix_anchor).expect(
+            "build_program output must contain the InlinedCall relation (used as the prologue boundary for this test)",
+        );
+        let suffix = &egglog_prog[suffix_start..];
+
+        let expected_program_egglog = format!(
+            "\n; Prologue\n{}\n\n{}",
+            crate::prologue_egglog_text(),
+            suffix
+        );
+        let actual_program_egglog = format!("\n; Prologue\n{}\n\n{}", crate::prologue(), suffix);
+
+        let expected = run_and_extract(&program, &expected_program_egglog);
+        let actual = run_and_extract(&program, &actual_program_egglog);
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "text backend extracted rec_to_loop program",
+                    "eggplant backend extracted rec_to_loop program",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+        assert!(
+            actual.contains("DoWhile"),
+            "rec_to_loop regression should extract a looped program"
+        );
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2848,6 +3028,8 @@ mod tests {
         let actual = strip_loop_unroll_generated_sections(&actual);
         let expected = strip_swap_if_generated_sections(&expected);
         let actual = strip_swap_if_generated_sections(&actual);
+        let expected = strip_rec_to_loop_generated_sections(&expected);
+        let actual = strip_rec_to_loop_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
