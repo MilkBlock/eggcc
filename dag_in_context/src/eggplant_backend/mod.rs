@@ -7,6 +7,7 @@ mod expr_size;
 mod interval_analysis;
 mod loop_invariant;
 mod loop_simplify;
+mod loop_unroll;
 mod mem_simple;
 mod memory;
 mod peepholes;
@@ -54,7 +55,7 @@ pub(crate) fn prologue() -> String {
         &mem_simple::fragment(),
         &loop_invariant::rules(),
         &loop_simplify::fragment(),
-        include_str!("../optimizations/loop_unroll.egg"),
+        &loop_unroll::fragment(),
         include_str!("../optimizations/swap_if.egg"),
         include_str!("../optimizations/rec_to_loop.egg"),
         include_str!("../optimizations/passthrough.egg"),
@@ -553,6 +554,27 @@ mod tests {
         while stripped.contains("\n\n\n") {
             stripped = stripped.replace("\n\n\n", "\n\n");
         }
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_loop_unroll_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_unroll.rs)\n";
+        const SECTION_HEADER: &str = ";; Some simple simplifications of loops\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset swap-if)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
         stripped = stripped.replace(
             &format!("\n\n{NEXT_SECTION_HEADER}"),
             &format!("\n{NEXT_SECTION_HEADER}"),
@@ -2039,6 +2061,63 @@ mod tests {
     }
 
     #[test]
+    fn loop_unroll_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_unroll.rs)\n";
+
+        let expected = include_str!("../optimizations/loop_unroll.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::loop_unroll::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/loop_unroll.egg (generated marker stripped)",
+                    "loop_unroll::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn loop_unroll_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_unroll.rs)\n";
+
+        let fragment = super::loop_unroll::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "loop_unroll::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            ";; Some simple simplifications of loops",
+            "(ruleset loop-unroll)",
+            "(ruleset loop-iters-analysis)",
+            "(set (LoopNumItersGuess inputs outputs) 1000)",
+            "(set (LoopNumItersGuess inputs outputs) 1)",
+            "(= (% start_const 4) 0)",
+            "(= (% end_constant 4) 0)",
+            "(set (LoopNumItersGuess inputs unrolled) (/ old_cost 4))",
+            ":ruleset loop-unroll)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated loop_unroll fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -2589,6 +2668,38 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_loop_unroll_rules() -> crate::Result {
+        use crate::ast::*;
+        use crate::egglog_test;
+
+        let prog = dowhile(
+            parallel!(int(0)),
+            parallel!(
+                less_than(add(getat(0), int(1)), int(8)),
+                add(getat(0), int(1))
+            ),
+        )
+        .add_arg_type(base(intt()));
+
+        let unrolled_add = add(add(add(add(getat(0), int(1)), int(1)), int(1)), int(1));
+        let expected = dowhile(
+            parallel!(int(0)),
+            parallel!(less_than(unrolled_add.clone(), int(8)), unrolled_add),
+        )
+        .add_arg_type(base(intt()))
+        .add_symbolic_ctx();
+
+        egglog_test(
+            &format!("{prog}"),
+            &format!("(check (= {prog} {expected}))"),
+            vec![prog.to_program(base(intt()), tuplet!(intt()))],
+            intv(0),
+            tuplev!(intv(8)),
+            vec![],
+        )
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -2635,6 +2746,8 @@ mod tests {
         let actual = strip_loop_invariant_generated_sections(&actual);
         let expected = strip_loop_simplify_generated_sections(&expected);
         let actual = strip_loop_simplify_generated_sections(&actual);
+        let expected = strip_loop_unroll_generated_sections(&expected);
+        let actual = strip_loop_unroll_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

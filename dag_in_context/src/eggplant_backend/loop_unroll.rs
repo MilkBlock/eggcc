@@ -1,0 +1,158 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(LOOP_UNROLL);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/loop_unroll.rs)\n";
+const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
+(ruleset loop-unroll)
+(ruleset loop-iters-analysis)
+
+
+;; by default, guess that all loops run 1000 times
+(rule ((DoWhile inputs outputs))
+      ((set (LoopNumItersGuess inputs outputs) 1000))
+      :ruleset loop-iters-analysis)
+
+;; For a loop that is false, its num iters is 1
+(rule 
+  ((= loop (DoWhile inputs outputs))
+   (= (Const (Bool false) ty ctx) (Get outputs 0)))
+  ((set (LoopNumItersGuess inputs outputs) 1))
+:ruleset loop-iters-analysis)
+
+;; Figure out number of iterations for a loop with constant bounds and initial value
+;; and i is updated before checking pred
+;; TODO: we could make it work for decrementing loops
+(rule
+  ((= lhs (DoWhile inputs outputs))
+   (= pred (Get outputs 0))
+   ;; iteration counter starts at start_const
+   (= (Const (Int start_const) _ty1 _ctx1) (Get inputs counter_i))
+   ;; updated counter at counter_i
+   (= next_counter (Get outputs (+ counter_i 1)))
+   ;; increments by some constant each loop
+   (= next_counter (Bop (Add) (Get (Arg _ty _ctx) counter_i)
+                              (Const (Int increment) _ty2 _ctx2)))
+   (> increment 0)
+   ;; while next_counter less than end_constant
+   (= pred (Bop (LessThan) next_counter
+                           (Const (Int end_constant) _ty3 _ctx3)))
+   ;; end constant is at least start constant
+   (>= end_constant start_const)
+  )
+  (
+    (set (LoopNumItersGuess inputs outputs) (/ (- end_constant start_const) increment))
+  )
+  :ruleset loop-iters-analysis)
+
+;; Figure out number of iterations for a loop with constant bounds and initial value
+;; and i is updated after checking pred
+(rule
+  ((= lhs (DoWhile inputs outputs))
+   (= pred (Get outputs 0))
+   ;; iteration counter starts at start_const
+   (= (Const (Int start_const) _ty1 _ctx1) (Get inputs counter_i))
+   (= body-arg (Get (Arg _ty _ctx) counter_i))
+   ;; updated counter at counter_i
+   (= next_counter (Get outputs (+ counter_i 1)))
+   ;; increments by a constant each loop
+   (= next_counter (Bop (Add) body-arg
+                              (Const (Int increment) _ty2 _ctx2)))
+   (> increment 0)
+   ;; while this counter less than end_constant
+   (= pred (Bop (LessThan) body-arg
+                           (Const (Int end_constant) _ty3 _ctx3)))
+   ;; end constant is at least start constant
+   (>= end_constant start_const)
+  )
+  (
+    (set (LoopNumItersGuess inputs outputs) (+ (/ (- end_constant start_const) increment) 1))
+  )
+  :ruleset loop-iters-analysis)
+
+;; loop peeling rule
+;; Only peel loops that we know iterate < 3 times
+;; (constructor LoopPeeledPlaceholder (Expr) Assumption :unextractable)
+
+;; WARNING: THIS RULE DOES NOT MAINTAIN WEAK LINEARITY
+;; If another already peeled loop exists in the egraph, it can violate the invariant.
+;; See the eggcc paper for what rules are safe.
+;; (ruleset loop-peel)
+;;(rule
+;; ((= lhs (DoWhile inputs outputs))
+;;  (ContextOf lhs ctx)
+;;  (HasType inputs inputs-ty)
+;;  (= outputs-len (tuple-length outputs))
+;;  (= old_cost (LoopNumItersGuess inputs outputs))
+;;  (< old_cost 3)
+;;  )
+;; (
+;;  (let executed-once
+;;    (Subst ctx inputs outputs))
+;;  (let executed-once-body
+;;     (SubTuple executed-once 1 (- outputs-len 1)))
+;;  (let then-ctx
+;;    (InIf true (Get executed-once 0) executed-once-body))
+;;  (let else-ctx
+;;    (InIf false (Get executed-once 0) executed-once-body))
+;;
+;;  (let new-loop-arg
+;;    (Arg inputs-ty then-ctx))
+;;  (let new-loop-body
+;;    (Subst (LoopPeeledPlaceholder lhs) new-loop-arg outputs))
+;;  (union (InLoop new-loop-arg new-loop-body) (LoopPeeledPlaceholder lhs))
+;;
+;;  (union lhs
+;;    ;; check if we need to continue executing the loop
+;;    (If (Get executed-once 0)
+;;      executed-once-body ;; inputs are the body executed once
+;;      (DoWhile new-loop-arg new-loop-body)
+;;      (Arg inputs-ty else-ctx)))
+;;
+;;  (set (LoopNumItersGuess new-loop-arg new-loop-body) (- old_cost 1))
+;;  )
+;; :ruleset loop-peel)
+;;
+;; unroll a loop with constant bounds and initial value
+(rule
+  ((= lhs (DoWhile inputs outputs))
+   (= num-inputs (tuple-length inputs))
+   (= pred (Get outputs 0))
+   ;; iteration counter starts at start_const
+   (= (Const (Int start_const) _ty1 _ctx1) (Get inputs counter_i))
+   ;; updated counter at counter_i
+   (= next_counter (Get outputs (+ counter_i 1)))
+   ;; increments by one each loop
+   (= next_counter (Bop (Add) (Get (Arg _ty _ctx) counter_i)
+                              (Const (Int 1) _ty2 _ctx2)))
+   ;; while less than end_constant
+   (= pred (Bop (LessThan) next_counter
+                           (Const (Int end_constant) _ty3 _ctx3)))
+   ;; start and end constant is a multiple of 4 and greater than start_const
+   (> end_constant start_const)
+   (= (% start_const 4) 0)
+   (= (% end_constant 4) 0)
+   (= old_cost (LoopNumItersGuess inputs outputs))
+  )
+  (
+    (let one-iter (SubTuple outputs 1 num-inputs))
+    (let unrolled
+        (Subst (TmpCtx) one-iter
+          (Subst (TmpCtx) one-iter
+            (Subst (TmpCtx) one-iter
+               outputs))))
+    (union lhs
+      (DoWhile inputs
+        unrolled))
+    (let actual-ctx (InLoop inputs unrolled))
+    (union (TmpCtx) actual-ctx)
+
+    (set (LoopNumItersGuess inputs unrolled) (/ old_cost 4))
+    (delete (TmpCtx))
+  )
+  :ruleset loop-unroll)"#;
