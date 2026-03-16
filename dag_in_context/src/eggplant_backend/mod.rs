@@ -5,6 +5,7 @@ mod context_prop;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
+mod ivt;
 mod loop_invariant;
 mod loop_simplify;
 mod loop_strength_reduction;
@@ -64,7 +65,7 @@ pub(crate) fn prologue() -> String {
         &rec_to_loop::fragment(),
         &passthrough::fragment(),
         &loop_strength_reduction::fragment(),
-        include_str!("../optimizations/ivt.egg"),
+        &ivt::fragment(),
         include_str!("../optimizations/conditional_invariant_code_motion.egg"),
         include_str!("../optimizations/conditional_push_in.egg"),
         include_str!("../utility/debug-helper.egg"),
@@ -654,6 +655,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/loop_strength_reduction.rs)\n";
         const SECTION_HEADER: &str = ";; ORIGINAL\n";
         const NEXT_SECTION_HEADER: &str = "(relation IVTNewInputsAnalysisDemand (Expr))\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_ivt_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/ivt.rs)\n";
+        const SECTION_HEADER: &str = "(relation IVTNewInputsAnalysisDemand (Expr))\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset cicm)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2428,6 +2450,60 @@ mod tests {
     }
 
     #[test]
+    fn ivt_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/ivt.rs)\n";
+
+        let expected = include_str!("../optimizations/ivt.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::ivt::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/ivt.egg (generated marker stripped)",
+                    "ivt::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn ivt_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/ivt.rs)\n";
+
+        let fragment = super::ivt::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "ivt::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(relation IVTNewInputsAnalysisDemand (Expr))",
+            "(ruleset ivt-analysis)",
+            "(constructor IVTAnalysisRes (Expr Expr             TypeList         i64) IVTRes)",
+            "(function IVTNewInputsAnalysisImpl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))",
+            "(ruleset loop-inversion)",
+            "(union final-permuted loop)",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated ivt fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -3199,6 +3275,66 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_ivt_rules() -> crate::Result {
+        // Initialize the logger for this test
+        let _ = env_logger::try_init();
+
+        use crate::ast::*;
+        use crate::egglog_test;
+
+        let cond = less_than(getat(0), int(10));
+        let if_in_loop = tif(
+            cond.clone(),
+            parallel!(add(getat(0), getat(1))),
+            parallel!(add(getat(0), int(1)), int(2)),
+            parallel!(getat(0), int(3)),
+        );
+
+        let my_loop = dowhile(
+            parallel!(int(0), int(0), int(1)),
+            parallel!(
+                cond,
+                get(if_in_loop.clone(), 0),
+                get(if_in_loop, 1),
+                getat(2)
+            ),
+        )
+        .add_arg_type(tuplet!())
+        .add_ctx(infunc("main"))
+        .0;
+
+        let added = add(getat(0), int(1));
+        let inner_loop_new = dowhile(
+            arg(),
+            parallel!(
+                less_than(added.clone(), int(10)),
+                add(added, int(2)),
+                getat(1)
+            ),
+        );
+        let expected_if = tif(ttrue(), parallel!(int(0), int(1)), inner_loop_new, arg());
+
+        let expected = parallel!(get(expected_if.clone(), 0), int(3), get(expected_if, 1))
+            .add_arg_type(tuplet!())
+            .add_symbolic_ctx();
+
+        egglog_test(
+            &format!("(let myloop {my_loop})"),
+            &format!("(check (= myloop {expected}))"),
+            vec![
+                my_loop.to_program(emptyt(), tuplet!(intt(), intt(), intt())),
+                expected
+                    .add_ctx(infunc("main"))
+                    .0
+                    .to_program(emptyt(), tuplet!(intt(), intt(), intt())),
+            ],
+            tuplev!(),
+            tuplev!(intv(12), intv(3), intv(1)),
+            vec![],
+        )
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3255,6 +3391,8 @@ mod tests {
         let actual = strip_passthrough_generated_sections(&actual);
         let expected = strip_loop_strength_reduction_generated_sections(&expected);
         let actual = strip_loop_strength_reduction_generated_sections(&actual);
+        let expected = strip_ivt_generated_sections(&expected);
+        let actual = strip_ivt_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()

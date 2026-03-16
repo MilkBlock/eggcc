@@ -1,0 +1,195 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(IVT);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/ivt.rs)\n";
+const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
+
+(ruleset ivt-analysis)
+
+(sort IVTRes)
+;;                              perm passthrough-perm passthrough-type passthrough-type-len
+(constructor IVTAnalysisRes (Expr Expr             TypeList         i64) IVTRes)
+(constructor IVTMin (IVTRes IVTRes) IVTRes)
+
+(rule ((= lhs (IVTMin (IVTAnalysisRes _a _b _c len1) (IVTAnalysisRes _d _e _f len2)))
+       (<= len1 len2))
+      ((union lhs (IVTAnalysisRes _a _b _c len1)))
+        :ruleset ivt-analysis)
+(rule ((= lhs (IVTMin (IVTAnalysisRes _a _b _c len1) (IVTAnalysisRes _d _e _f len2)))
+       (> len1 len2))
+      ((union lhs (IVTAnalysisRes _d _e _f len2)))
+        :ruleset ivt-analysis)
+
+
+;; use an analysis to avoid exploring all combinations of passthrough vs not passed through values. Always prefer not passed through
+;;                                  expr1 curr  if  result
+(function IVTNewInputsAnalysisImpl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))
+
+;; IVTNewInputsAnalysis computes a permutation perm which corresponds to accessing elements of an if region.
+;; It also makes accesses of passthrough arguments access new indices after the length of the if region.
+;; For example, if expr1 is: [get(if, 1), get(arg, 1), get(if, 0), get(arg, 3)]
+;; It produces a new permutation: [get(arg, 1), get(arg, 2), get(arg, 0), get(arg, 3)]
+;; The accesses of the if statement remain unchanged, and the accesses of the passthrough arguments are moved to the end.
+;; This new permutation is intended to be used with a substitution argument (Concat if-statement passthrough-args)
+;; Also produced is a passthrough-perm, which selects all of the passthrough arguments and puts them in a single tuple
+;;                              expr1 if result
+(function IVTNewInputsAnalysis (Expr  Node) IVTRes :merge (IVTMin old new))
+
+
+(rule (
+    (DoWhile inpW outW)
+) (
+    (IVTNewInputsAnalysisDemand outW)
+) :ruleset ivt-analysis)
+
+(rule (
+    (IVTNewInputsAnalysisDemand loop-body)
+    ;; first input is a predicate
+    (= loop-body (Concat (Single pred) rest))
+    ;; another input is an if statement with shared predicate
+    (= if-eclass (If pred inputs thn else))
+    (= (Get loop-body i) (Get if-eclass j))
+    (!= i 0)
+) (
+    (let perm (Empty (TmpType) (InFunc "no-ctx")))
+    (set
+     (IVTNewInputsAnalysisImpl loop-body rest (IfNode if-eclass pred inputs thn else))
+     (IVTAnalysisRes perm perm (TNil) 0))
+) :ruleset ivt-analysis)
+
+;; recursive case for accessing the if statement
+(rule (
+    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= ifnode (IfNode if-eclass pred inputs then else))
+    (= curr (Concat (Single (Get if-eclass ith)) rest))
+) (
+    (let new-perm (Concat perm (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith))))
+    (set (IVTNewInputsAnalysisImpl loop-body rest ifnode)
+         (IVTAnalysisRes new-perm  pperm passthrough-tys len))
+) :ruleset ivt-analysis)
+
+;; recursive case for accessing a passed-through argument
+(rule (
+    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= ifnode (IfNode if-eclass pred inputs then else))
+    (= curr (Concat (Single (Get (Arg ty ctx) ith)) rest))
+    (= (Get loop-body (+ ith 1)) (Get curr 0))
+    (HasType (Get (Arg ty ctx) ith) (Base new-ty))
+    (= (tuple-length if-eclass) if-len)
+) (
+    (let get-passed-through (Single (Get (Arg (TmpType) (InFunc "no-ctx")) (+ if-len len))))
+    (let new-perm (Concat perm get-passed-through))
+    (let original-get-index (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith)))
+    (let new-pperm (Concat pperm original-get-index))
+    (let new-passthrough-tys (TLConcat passthrough-tys (TCons new-ty (TNil))))
+    (set (IVTNewInputsAnalysisImpl loop-body rest ifnode)
+         (IVTAnalysisRes new-perm new-pperm new-passthrough-tys (+ len 1)))
+) :ruleset ivt-analysis)
+
+; base case for accessing if statement
+(rule (
+    (= (IVTNewInputsAnalysisImpl loop-body (Single last) ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= ifnode (IfNode if-eclass pred inputs then else))
+    (= last (Get if-eclass ith))
+) (
+    (let new-perm (Concat perm (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith))))
+    (set (IVTNewInputsAnalysis loop-body ifnode) (IVTAnalysisRes new-perm pperm passthrough-tys len))
+) :ruleset ivt-analysis)
+
+; base case for accessing a passed-through argument
+(rule (
+    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= ifnode (IfNode if-eclass pred inputs then else))
+    (= curr (Single (Get (Arg ty ctx) ith)))
+    (= (Get loop-body (+ ith 1)) (Get curr 0))
+    (HasType (Get (Arg ty ctx) ith) (Base new-ty))
+    (= (tuple-length if-eclass) if-len)
+) (
+    (let get-passed-through (Single (Get (Arg (TmpType) (InFunc "no-ctx")) (+ if-len len))))
+    (let new-perm (Concat perm get-passed-through))
+    (let original-get-index (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith)))
+    (let new-pperm (Concat pperm original-get-index))
+    (let new-passthrough-tys (TLConcat passthrough-tys (TCons new-ty (TNil))))
+    (set (IVTNewInputsAnalysis loop-body ifnode) (IVTAnalysisRes new-perm new-pperm new-passthrough-tys (+ len 1)))
+) :ruleset ivt-analysis)
+
+
+(ruleset loop-inversion)
+
+(rule (
+    (= loop (DoWhile inpW outW))
+    (= (IVTNewInputsAnalysis outW ifnode) (IVTAnalysisRes perm pperm passthrough-tys _len))
+    (= ifnode (IfNode if if-cond if-inputs then else))
+    (= if-inputs-len (tuple-length if-inputs))
+    (= passthrough-len (TypeList-length passthrough-tys))
+
+    (ContextOf inpW outer-ctx)
+    (ContextOf if-inputs if-ctx)
+    (HasType if-inputs inputs-ty)
+    (= inputs-ty (TupleT inputs-ty-list))
+) (
+    ;; new peeled condition, checks the if's condition before the first iteration
+    (let new-if-cond (Subst outer-ctx inpW if-cond))
+
+    ;; new inputs to the if are 1) the inputs run once unconditionally concatted with
+    ;; 2) the passthrough values
+    (let new-if-inp
+        (Concat (Subst outer-ctx inpW if-inputs)
+                (Subst outer-ctx inpW pperm)))
+    ;; if contexts
+    (let new-if-true-ctx (InIf true new-if-cond new-if-inp))
+    (let new-if-false-ctx (InIf false new-if-cond new-if-inp))
+
+    (let new-loop-arg-ty (TupleT (TLConcat inputs-ty-list passthrough-tys)))
+    (let new-loop-arg (Arg new-loop-arg-ty (TmpCtx)))
+    (let new-loop-context (TmpCtx))
+
+    ;; body
+    ;; loop begins by running the then branch of the if statement, which uses the first if-inputs-length elements of arg
+    (let then-arg (SubTuple new-loop-arg 0 if-inputs-len))
+    (let new-then-branch
+        (Subst new-loop-context then-arg then))
+    ;; the inputs are then run on the combination of
+    ;; the then branch and the passthrough values
+    (let then-branch-and-passthrough
+      (Concat new-then-branch (SubTuple new-loop-arg if-inputs-len passthrough-len)))
+    ;; permute them to move passthrough and if outputs back
+    ;; to where if-inputs and if-cond expect them to be
+    (let permuted-then-branch-and-passthrough
+      (Subst new-loop-context then-branch-and-passthrough perm))
+    ;; substitute into inputs and condi
+    (let new-inputs-after-then-branch 
+        (Subst new-loop-context permuted-then-branch-and-passthrough
+            (Concat (Single if-cond) if-inputs)))
+    (let new-loop-outputs
+        (Concat new-inputs-after-then-branch
+           (SubTuple new-loop-arg if-inputs-len passthrough-len)))
+
+    (let new-loop (DoWhile (Arg new-loop-arg-ty new-if-true-ctx) new-loop-outputs))
+    (let new-if
+        (If new-if-cond new-if-inp
+            new-loop
+            (Arg new-loop-arg-ty new-if-false-ctx)))
+
+    ;; Apply the body of the false branch as an afterprocessing wrapper
+    (let final-if-inputs
+       (SubTuple new-if 0 if-inputs-len))
+    (let else-branch-end
+        (Subst outer-ctx final-if-inputs else))
+    (let else-branch-end-and-passthrough
+        (Concat else-branch-end
+               (SubTuple new-if if-inputs-len passthrough-len)))
+    (let final-permuted
+        (Subst outer-ctx else-branch-end-and-passthrough perm))
+
+    (union final-permuted loop)
+    (union new-loop-context (InLoop (Arg new-loop-arg-ty new-if-true-ctx) new-loop-outputs))
+
+    (subsume (DoWhile inpW outW))
+    (delete (TmpCtx))
+) :ruleset loop-inversion)"#;
