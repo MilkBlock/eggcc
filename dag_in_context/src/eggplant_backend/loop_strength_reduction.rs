@@ -1,0 +1,121 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(LOOP_STRENGTH_REDUCTION);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/loop_strength_reduction.rs)\n";
+const LOOP_STRENGTH_REDUCTION: &str = r#";; ORIGINAL
+;; a = 0
+;; c = 3
+;; for  i = 0 to n:
+;;     a = i * c
+;;
+;; OPTIMIZED
+;; a = 0
+;; c = 3
+;; d = 0
+;; for i = 0 to n:
+;;     a += d
+;;     d += c
+(ruleset loop-strength-reduction)
+
+; Finds invariants/constants within a body.
+; Columns: body; value of invariant in inputs; value of invariant in outputs
+;; Get the input and output value of an invariant, or constant int, within the loop
+;;             loop in   out
+(relation lsr-inv (Expr Expr Expr))
+
+; TODO: there may be a bug with finding the invariant, or it just may not be extracted.
+; Can make this work on loop_with_mul_by_inv and a rust test later.
+; (rule (
+;     (= loop (DoWhile inputs pred-and-body))
+;     (= (Get outputs (+ i 1)) (Get (Arg arg-type assm) i)))
+;     ((inv loop (Get inputs i) (Get (Arg arg-type assm) i))) :ruleset always-run)
+(rule (
+    (= loop (DoWhile inputs pred-and-body))
+    (ContextOf inputs loop-input-ctx)
+    (ContextOf pred-and-body loop-output-ctx)
+    (= constant (Const c out-type loop-output-ctx))
+    (HasArgType inputs in-type)
+    )
+    ((lsr-inv loop (Const c in-type loop-input-ctx) constant)) :ruleset always-run)
+
+(rule 
+    (
+        ;; Find loop
+        (= old-loop (DoWhile inputs pred-and-outputs))
+        (ContextOf pred-and-outputs loop-ctx)
+
+        ; Find loop variable (argument that gets incremented with an invariant)
+        (lsr-inv old-loop loop-incr-in loop-incr-out)
+        ; Since the first el of pred-and-outputs is the pred, we need to offset i
+        (= (Get pred-and-outputs (+ i 1)) (Bop (Add) (Get (Arg arg-type assm) i) loop-incr-out))
+
+        ; Find invariant where input is same as output, or constant
+        (lsr-inv old-loop c-in c-out)
+
+        ; Find multiplication of loop variable and invariant
+        (= old-mul (Bop (Mul) c-out (Get (Arg arg-type assm) i)))
+        (ContextOf old-mul loop-ctx)
+
+        (= arg-type (TupleT ty-list))
+        ; n is index of our new, temporary variable d
+        (= n (tuple-length inputs))
+    )
+    (
+        ; Each time we need to update d by the product of the multiplied constant and the loop increment
+        (let addend (Bop (Mul) c-out loop-incr-out))
+
+        ; Initial value of d is i * c
+        (let d-init (Bop (Mul) c-in (Get inputs i)))
+
+        ; Construct optimized theta
+        ; new-inputs already has the correct context
+        (let new-inputs (Concat inputs (Single d-init)))
+
+        ; We need to create a new type, with one more input
+        (let new-arg-ty (TupleT (TLConcat ty-list (TCons (IntT) (TNil)))))
+        (let replace-arg (SubTuple (Arg new-arg-ty (TmpCtx)) 0 n))
+
+        ; Value of d in loop. Add context to addend
+        (let d-out (Bop (Add) (Get (Arg new-arg-ty (TmpCtx)) n)
+                   (Subst (TmpCtx) replace-arg addend)))
+
+        ; build the old body, making sure to set the correct arg type and context
+        (let new-body
+          (Concat
+            (Subst (TmpCtx) replace-arg pred-and-outputs)
+            (Single d-out)))
+
+        (let new-loop (DoWhile new-inputs new-body))
+
+        (let new-c (Subst (TmpCtx) replace-arg c-out))
+
+        ; Now that we have the new loop, union the temporary context with the actual ctx
+        (union (TmpCtx) (InLoop new-inputs new-body))
+
+        ; Substitute d for the *i expression
+        (let new-mul
+            (Bop (Mul) new-c (Get replace-arg i)))
+        (union (Get (Arg new-arg-ty (TmpCtx)) n) new-mul)
+
+        ; Subsume the multiplication in the new loop to prevent
+        ; from firing loop strength reduction again on the new loop
+        ; Workaround of egglog issue: https://github.com/egraphs-good/egglog/issues/462
+        ; add the expression we are about to subsume
+        (let before
+          (Bop (Mul) new-c (Get replace-arg i)))
+        ; now subsume it
+        (subsume
+          (Bop (Mul) new-c (Get replace-arg i)))
+
+        ; Project all but last
+        (union old-loop (SubTuple new-loop 0 n))
+        (delete (TmpCtx))
+    )
+    :ruleset loop-strength-reduction
+)"#;

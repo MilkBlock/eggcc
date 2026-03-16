@@ -7,6 +7,7 @@ mod expr_size;
 mod interval_analysis;
 mod loop_invariant;
 mod loop_simplify;
+mod loop_strength_reduction;
 mod loop_unroll;
 mod mem_simple;
 mod memory;
@@ -62,7 +63,7 @@ pub(crate) fn prologue() -> String {
         &swap_if::fragment(),
         &rec_to_loop::fragment(),
         &passthrough::fragment(),
-        include_str!("../optimizations/loop_strength_reduction.egg"),
+        &loop_strength_reduction::fragment(),
         include_str!("../optimizations/ivt.egg"),
         include_str!("../optimizations/conditional_invariant_code_motion.egg"),
         include_str!("../optimizations/conditional_push_in.egg"),
@@ -632,6 +633,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/passthrough.rs)\n";
         const SECTION_HEADER: &str = "(ruleset passthrough)\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset loop-strength-reduction)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_loop_strength_reduction_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_strength_reduction.rs)\n";
+        const SECTION_HEADER: &str = ";; ORIGINAL\n";
+        const NEXT_SECTION_HEADER: &str = "(relation IVTNewInputsAnalysisDemand (Expr))\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2352,6 +2374,60 @@ mod tests {
     }
 
     #[test]
+    fn loop_strength_reduction_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_strength_reduction.rs)\n";
+
+        let expected = include_str!("../optimizations/loop_strength_reduction.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::loop_strength_reduction::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/loop_strength_reduction.egg (generated marker stripped)",
+                    "loop_strength_reduction::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn loop_strength_reduction_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/loop_strength_reduction.rs)\n";
+
+        let fragment = super::loop_strength_reduction::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "loop_strength_reduction::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            ";; ORIGINAL",
+            "(ruleset loop-strength-reduction)",
+            "(relation lsr-inv (Expr Expr Expr))",
+            "(= old-loop (DoWhile inputs pred-and-outputs))",
+            "(let new-inputs (Concat inputs (Single d-init)))",
+            "(union old-loop (SubTuple new-loop 0 n))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated loop_strength_reduction fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -3086,6 +3162,43 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_loop_strength_reduction_rules() -> crate::Result {
+        use crate::ast::*;
+        use crate::egglog_test;
+
+        let prog = dowhile(
+            parallel!(int(0), int(0)),
+            parallel!(
+                less_than(add(getat(0), int(1)), int(8)),
+                add(getat(0), int(1)),
+                mul(int(3), getat(0))
+            ),
+        )
+        .add_arg_type(emptyt());
+
+        let expected = dowhile(
+            parallel!(int(0), int(0), int(0)),
+            parallel!(
+                less_than(add(getat(0), int(1)), int(8)),
+                add(getat(0), int(1)),
+                getat(2),
+                add(getat(2), int(3))
+            ),
+        )
+        .add_arg_type(emptyt())
+        .add_symbolic_ctx();
+
+        egglog_test(
+            &format!("(let myloop {prog})"),
+            &format!("(check (= myloop (SubTuple {expected} 0 2)))"),
+            vec![prog.to_program(emptyt(), tuplet!(intt(), intt()))],
+            emptyv(),
+            tuplev!(intv(8), intv(21)),
+            vec![],
+        )
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3140,6 +3253,8 @@ mod tests {
         let actual = strip_rec_to_loop_generated_sections(&actual);
         let expected = strip_passthrough_generated_sections(&expected);
         let actual = strip_passthrough_generated_sections(&actual);
+        let expected = strip_loop_strength_reduction_generated_sections(&expected);
+        let actual = strip_loop_strength_reduction_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
