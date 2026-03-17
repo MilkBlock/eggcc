@@ -16,6 +16,7 @@ mod loop_strength_reduction;
 mod loop_unroll;
 mod mem_simple;
 mod memory;
+mod non_weakly_linear;
 mod passthrough;
 mod peepholes;
 mod purity_analysis;
@@ -36,46 +37,46 @@ pub(crate) fn prologue() -> String {
     // even though the backend is still transitioning from `.egg` text to Rust.
     let _ = eggplant::prelude::RunConfig::Once;
 
-    [
-        &schema::fragment(),
-        &type_analysis::fragment(),
-        &util::fragment(),
-        &terms::fragment(),
-        &crate::optimizations::is_valid::rules().join("\n"),
-        &crate::optimizations::is_resolved::rules().join("\n"),
-        &crate::optimizations::body_contains::rules().join("\n"),
-        &purity_analysis::fragment(),
+    vec![
+        schema::fragment(),
+        type_analysis::fragment(),
+        util::fragment(),
+        terms::fragment(),
+        crate::optimizations::is_valid::rules().join("\n"),
+        crate::optimizations::is_resolved::rules().join("\n"),
+        crate::optimizations::body_contains::rules().join("\n"),
+        purity_analysis::fragment(),
         // TODO cond inv code motion with regions
         //&crate::optimizations::conditional_invariant_code_motion::rules().join("\n"),
-        &add_context::fragment(),
-        &context_prop::fragment(),
-        &term_subst::fragment(),
-        &context_of::fragment(),
-        &subst::fragment(),
-        &canonicalize::fragment(),
-        &expr_size::fragment(),
-        &drop_at::fragment(),
-        &interval_analysis::fragment(),
-        &switch_rewrites::fragment(),
-        &select::fragment(),
-        &peepholes::fragment(),
-        &crate::optimizations::memory::rules(),
-        &memory::fragment(),
-        &mem_simple::fragment(),
-        &loop_invariant::rules(),
-        &loop_simplify::fragment(),
-        &loop_unroll::fragment(),
-        &swap_if::fragment(),
-        &rec_to_loop::fragment(),
-        &passthrough::fragment(),
-        &loop_strength_reduction::fragment(),
-        &ivt::fragment(),
-        &conditional_invariant_code_motion::fragment(),
-        &conditional_push_in::fragment(),
-        &debug_helper::fragment(),
-        &hackers_delight::fragment(),
-        include_str!("../optimizations/non_weakly_linear.egg"),
-        &crate::schedule::rulesets(),
+        add_context::fragment(),
+        context_prop::fragment(),
+        term_subst::fragment(),
+        context_of::fragment(),
+        subst::fragment(),
+        canonicalize::fragment(),
+        expr_size::fragment(),
+        drop_at::fragment(),
+        interval_analysis::fragment(),
+        switch_rewrites::fragment(),
+        select::fragment(),
+        peepholes::fragment(),
+        crate::optimizations::memory::rules(),
+        memory::fragment(),
+        mem_simple::fragment(),
+        loop_invariant::rules(),
+        loop_simplify::fragment(),
+        loop_unroll::fragment(),
+        swap_if::fragment(),
+        rec_to_loop::fragment(),
+        passthrough::fragment(),
+        loop_strength_reduction::fragment(),
+        ivt::fragment(),
+        conditional_invariant_code_motion::fragment(),
+        conditional_push_in::fragment(),
+        debug_helper::fragment(),
+        hackers_delight::fragment(),
+        non_weakly_linear::fragment(),
+        crate::schedule::rulesets(),
     ]
     .join("\n")
 }
@@ -765,6 +766,27 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/hackers_delight.rs)\n";
         const SECTION_HEADER: &str = ";; Hacker's delight optimizations\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset non-weakly-linear)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_non_weakly_linear_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/non_weakly_linear.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset non-weakly-linear)\n";
+        const NEXT_SECTION_HEADER: &str = "(unstable-combined-ruleset cheap-optimizations\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2804,6 +2826,59 @@ mod tests {
     }
 
     #[test]
+    fn non_weakly_linear_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/non_weakly_linear.rs)\n";
+
+        let expected = include_str!("../optimizations/non_weakly_linear.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::non_weakly_linear::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/non_weakly_linear.egg (generated marker stripped)",
+                    "non_weakly_linear::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn non_weakly_linear_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/non_weakly_linear.rs)\n";
+
+        let fragment = super::non_weakly_linear::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "non_weakly_linear::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset non-weakly-linear)",
+            "(union if_e (Subst ctx inputs thn))",
+            "(union if_e (Subst ctx inputs els))",
+            "((union (Get load 1) state))",
+            "(set (LoopNumItersGuess new-loop-input new-loop-body) (- old_cost 1))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated non_weakly_linear fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -3779,6 +3854,21 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_non_weakly_linear_rules() {
+        let ctx = "(InFunc \"DUMMY\")";
+        let inputs = "(Arg (Base (IntT)) (InFunc \"DUMMY\"))";
+        let then_branch =
+            "(Bop (Add) (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Const (Int 1) (Base (IntT)) (InFunc \"DUMMY\")))";
+        let program = format!(
+            "{}\n(let __rlcr_if (If (Const (Bool true) (Base (BoolT)) {ctx}) {inputs} {then_branch} (Const (Int 9) (Base (IntT)) {ctx})))\n(run-schedule non-weakly-linear)\n(check (= __rlcr_if (Subst {ctx} {inputs} {then_branch})))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3845,6 +3935,8 @@ mod tests {
         let actual = strip_debug_helper_generated_sections(&actual);
         let expected = strip_hackers_delight_generated_sections(&expected);
         let actual = strip_hackers_delight_generated_sections(&actual);
+        let expected = strip_non_weakly_linear_generated_sections(&expected);
+        let actual = strip_non_weakly_linear_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
