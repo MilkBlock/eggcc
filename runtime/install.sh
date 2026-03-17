@@ -19,13 +19,8 @@ cd runtime
 # Duplicate runtime.bc files can mess things up,
 # so make sure we start from a clean slate.
 cargo clean
-# Use an installed LLVM-18 toolchain and fail fast instead of triggering rustup downloads.
-if ! rustup which --toolchain "$TOOLCHAIN" cargo >/dev/null 2>&1; then
-    echo "Rust toolchain '$TOOLCHAIN' is not installed." >&2
-    echo "Install it first or override RUNTIME_RUST_TOOLCHAIN to an installed LLVM-18 toolchain." >&2
-    exit 1
-fi
-
+# Prefer an already-installed toolchain when present, but allow rustup/cargo
+# to install it in CI or on fresh machines where network access is available.
 cargo +"$TOOLCHAIN" rustc --release -- --emit=llvm-bc
 cp ./target/release/deps/runtime-*.bc ./rt.bc
 cc -c rt.c -o rt.o
