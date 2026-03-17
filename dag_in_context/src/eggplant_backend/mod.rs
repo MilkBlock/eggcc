@@ -1,5 +1,6 @@
 mod add_context;
 mod canonicalize;
+mod conditional_invariant_code_motion;
 mod context_of;
 mod context_prop;
 mod drop_at;
@@ -66,7 +67,7 @@ pub(crate) fn prologue() -> String {
         &passthrough::fragment(),
         &loop_strength_reduction::fragment(),
         &ivt::fragment(),
-        include_str!("../optimizations/conditional_invariant_code_motion.egg"),
+        &conditional_invariant_code_motion::fragment(),
         include_str!("../optimizations/conditional_push_in.egg"),
         include_str!("../utility/debug-helper.egg"),
         include_str!("../optimizations/hackers_delight.egg"),
@@ -676,6 +677,26 @@ mod tests {
             "; (Generated from eggplant Rust: src/eggplant_backend/ivt.rs)\n";
         const SECTION_HEADER: &str = "(relation IVTNewInputsAnalysisDemand (Expr))\n";
         const NEXT_SECTION_HEADER: &str = "(ruleset cicm)\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_conditional_invariant_code_motion_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/conditional_invariant_code_motion.rs)\n";
+        const SECTION_HEADER: &str = "(ruleset cicm)\n";
+        const NEXT_SECTION_HEADER: &str = "(ruleset push-in)\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2504,6 +2525,58 @@ mod tests {
     }
 
     #[test]
+    fn conditional_invariant_code_motion_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/conditional_invariant_code_motion.rs)\n";
+
+        let expected = include_str!("../optimizations/conditional_invariant_code_motion.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::conditional_invariant_code_motion::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "optimizations/conditional_invariant_code_motion.egg (generated marker stripped)",
+                    "conditional_invariant_code_motion::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn conditional_invariant_code_motion_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/conditional_invariant_code_motion.rs)\n";
+
+        let fragment = super::conditional_invariant_code_motion::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "conditional_invariant_code_motion::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset cicm)",
+            "(ruleset cicm-index)",
+            "(relation InvCodeMotionCandidate (Expr Expr))",
+            "(relation ExtractedExprCache (Term Expr Assumption))",
+            "(let new_term (TermSubst outer_ctx orig_ins t1))",
+            "(union if_e (If pred new_ins new_thn new_els))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated conditional_invariant_code_motion fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -3335,6 +3408,63 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_conditional_invariant_code_motion_rules() {
+        use crate::ast::*;
+
+        fn run(prologue: &str, expr: &str) -> (String, Vec<String>) {
+            let helpers = crate::schedule::helpers();
+            let program = format!(
+                "{prologue}\n(let __rlcr_expr {expr})\n(ExprIsValid __rlcr_expr)\n(run-schedule {helpers})\n(run-schedule cicm)\n(run-schedule {helpers})\n"
+            );
+            let mut egraph = egglog::EGraph::default();
+            egraph.parse_and_run_program(None, &program).unwrap();
+
+            let (serialized, _) = crate::greedy_dag_extractor::serialized_egraph(egraph.clone());
+            let if_nodes = serialized
+                .nodes
+                .values()
+                .filter(|node| node.op == "If")
+                .map(|node| format!("{node:?}"))
+                .collect::<Vec<_>>();
+
+            let mut termdag = egglog::TermDag::default();
+            let (sort, value) = egraph
+                .eval_expr(&egglog::ast::Expr::Var(
+                    egglog::ast::Span::Panic,
+                    "__rlcr_expr".into(),
+                ))
+                .unwrap();
+            let (_, extracted) = egraph.extract(value, &mut termdag, &sort).unwrap();
+            (termdag.to_string(&extracted), if_nodes)
+        }
+
+        let candidate = tif(
+            getat(2),
+            parallel!(getat(0), getat(1), getat(3)),
+            less_than(getat(0), int(7)),
+            less_than(getat(1), int(7)),
+        )
+        .with_arg_types(tuplet!(intt(), intt(), boolt(), statet()), base(boolt()));
+
+        let (expected_extracted, expected_if_nodes) =
+            run(&crate::prologue_egglog_text(), &candidate.to_string());
+        let (actual_extracted, actual_if_nodes) = run(&crate::prologue(), &candidate.to_string());
+
+        assert_eq!(
+            actual_extracted, expected_extracted,
+            "migrated cicm fragment should match the text backend extracted expression"
+        );
+        assert_eq!(
+            actual_if_nodes, expected_if_nodes,
+            "migrated cicm fragment should match the text backend serialized If nodes"
+        );
+        assert!(
+            actual_if_nodes.iter().any(|node| node.contains("SubTuple")),
+            "helpers+cicm regression should preserve the normalized If input shape"
+        );
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3393,6 +3523,8 @@ mod tests {
         let actual = strip_loop_strength_reduction_generated_sections(&actual);
         let expected = strip_ivt_generated_sections(&expected);
         let actual = strip_ivt_generated_sections(&actual);
+        let expected = strip_conditional_invariant_code_motion_generated_sections(&expected);
+        let actual = strip_conditional_invariant_code_motion_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
