@@ -6,8 +6,7 @@ pub(crate) fn fragment() -> String {
     out
 }
 
-const GENERATED_MARKER: &str =
-    "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
+const GENERATED_MARKER: &str = "; (Generated from eggplant Rust: src/eggplant_backend/subst.rs)\n";
 const SUBST: &str = r#";; Substitution rules allow for substituting some new expression for the argument
 ;; in some new context.
 ;; It performs the substitution, copying over the equalities from the original eclass.
