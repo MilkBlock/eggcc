@@ -1,0 +1,143 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(DEBUG_HELPER);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/debug_helper.rs)\n";
+const DEBUG_HELPER: &str = r#";; use these rules to clean up the database, removing helpers
+;; this makes the visualization easier to read
+
+(ruleset debug-deletes)
+
+(rule ((HasType a b))
+      ((delete (HasType a b)))
+      :ruleset debug-deletes)
+
+(rule ((BodyContainsExpr a b))
+      ((delete (BodyContainsExpr a b)))
+      :ruleset debug-deletes)
+
+(rule ((ExprIsPure e))
+      ((delete (ExprIsPure e)))
+      :ruleset debug-deletes)
+
+(rule ((HasArgType e ty))
+      ((delete (HasArgType e ty)))
+      :ruleset debug-deletes)
+
+(rule ((is-inv-Expr e ty))
+      ((delete (is-inv-Expr e ty)))
+      :ruleset debug-deletes)
+
+(rule ((tuple-length e))
+      ((delete (tuple-length e)))
+      :ruleset debug-deletes)
+
+(rule ((BinaryOpIsPure e))
+      ((delete (BinaryOpIsPure e)))
+      :ruleset debug-deletes)
+
+(rule ((ContextOf e a))
+      ((delete (ContextOf e a)))
+      :ruleset debug-deletes)
+
+(rule ((ExprIsResolved e))
+      ((delete (ExprIsResolved e)))
+      :ruleset debug-deletes)
+
+(rule ((bop->string a b))
+      ((delete (bop->string a b)))
+      :ruleset debug-deletes)
+
+(rule ((bpred-of-type a b))
+      ((delete (bpred-of-type a b)))
+      :ruleset debug-deletes)
+
+(rule ((PureType e))
+      ((delete (PureType e)))
+      :ruleset debug-deletes)
+
+(rule ((PointsToCells a b))
+      ((delete (PointsToCells a b)))
+      :ruleset debug-deletes)
+
+(rule ((TuplePointsTo e))
+      ((delete (TuplePointsTo e)))
+      :ruleset debug-deletes)
+
+(rule ((Resolved-List<PtrPointees> e))
+      ((delete (Resolved-List<PtrPointees> e)))
+      :ruleset debug-deletes)
+
+(rule ((TypeListToList<PtrPointees> e))
+      ((delete (TypeListToList<PtrPointees> e)))
+      :ruleset debug-deletes)
+
+(rule ((Cons-List<PtrPointees> a b))
+      ((delete (Cons-List<PtrPointees> a b)))
+      :ruleset debug-deletes)
+
+(rule ((Nil-List<PtrPointees>))
+      ((delete (Nil-List<PtrPointees>)))
+      :ruleset debug-deletes)
+
+(rule ((Length-List<PtrPointees> e))
+      ((delete (Length-List<PtrPointees> e)))
+      :ruleset debug-deletes)
+
+(rule ((At-List<PtrPointees> a b c))
+      ((delete (At-List<PtrPointees> a b c)))
+      :ruleset debug-deletes)
+
+(rule ((IsNonEmpty-List<PtrPointees> a))
+      ((delete (IsNonEmpty-List<PtrPointees> a)))
+      :ruleset debug-deletes)
+
+(rule ((Resolved-List<i64+IntInterval> e))
+      ((delete (Resolved-List<i64+IntInterval> e)))
+      :ruleset debug-deletes)
+
+(rule ((Cons-List<i64+IntInterval> a b c))
+      ((delete (Cons-List<i64+IntInterval> a b c)))
+      :ruleset debug-deletes)
+
+(rule ((Nil-List<i64+IntInterval>))
+      ((delete (Nil-List<i64+IntInterval>)))
+      :ruleset debug-deletes)
+
+(rule ((Length-List<i64+IntInterval> e))
+      ((delete (Length-List<i64+IntInterval> e)))
+      :ruleset debug-deletes)
+
+(rule ((At-List<i64+IntInterval> a b c d))
+      ((delete (At-List<i64+IntInterval> a b c d)))
+      :ruleset debug-deletes)
+
+(rule ((IsNonEmpty-List<i64+IntInterval> a))
+      ((delete (IsNonEmpty-List<i64+IntInterval> a)))
+      :ruleset debug-deletes)
+
+(rule ((TypeList-ith a b))
+      ((delete (TypeList-ith a b)))
+      :ruleset debug-deletes)
+
+
+(rule ((TupleT a))
+      ((delete (TupleT a)))
+      :ruleset debug-deletes)
+(rule ((TCons a b))
+      ((delete (TCons a b)))
+      :ruleset debug-deletes)
+(rule ((TNil))
+      ((delete (TNil)))
+      :ruleset debug-deletes)
+(rule ((Base a))
+      ((delete (Base a)))
+      :ruleset debug-deletes)
+(rule ((IntT))
+      ((delete (IntT)))
+      :ruleset debug-deletes)"#;

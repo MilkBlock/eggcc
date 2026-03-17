@@ -4,6 +4,7 @@ mod conditional_invariant_code_motion;
 mod conditional_push_in;
 mod context_of;
 mod context_prop;
+mod debug_helper;
 mod drop_at;
 mod expr_size;
 mod interval_analysis;
@@ -70,7 +71,7 @@ pub(crate) fn prologue() -> String {
         &ivt::fragment(),
         &conditional_invariant_code_motion::fragment(),
         &conditional_push_in::fragment(),
-        include_str!("../utility/debug-helper.egg"),
+        &debug_helper::fragment(),
         include_str!("../optimizations/hackers_delight.egg"),
         include_str!("../optimizations/non_weakly_linear.egg"),
         &crate::schedule::rulesets(),
@@ -720,6 +721,28 @@ mod tests {
         const SECTION_HEADER: &str = "(ruleset push-in)\n";
         const NEXT_SECTION_HEADER: &str =
             ";; use these rules to clean up the database, removing helpers\n";
+
+        let mut stripped = program.replace(GENERATED_MARKER, "");
+        while stripped.contains("\n\n\n") {
+            stripped = stripped.replace("\n\n\n", "\n\n");
+        }
+        stripped = stripped.replace(
+            &format!("\n\n{SECTION_HEADER}"),
+            &format!("\n{SECTION_HEADER}"),
+        );
+        stripped = stripped.replace(
+            &format!("\n\n{NEXT_SECTION_HEADER}"),
+            &format!("\n{NEXT_SECTION_HEADER}"),
+        );
+        stripped
+    }
+
+    fn strip_debug_helper_generated_sections(program: &str) -> String {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/debug_helper.rs)\n";
+        const SECTION_HEADER: &str =
+            ";; use these rules to clean up the database, removing helpers\n";
+        const NEXT_SECTION_HEADER: &str = ";; Hacker's delight optimizations\n";
 
         let mut stripped = program.replace(GENERATED_MARKER, "");
         while stripped.contains("\n\n\n") {
@@ -2653,6 +2676,59 @@ mod tests {
     }
 
     #[test]
+    fn debug_helper_fragment_matches_file_except_generated_sections() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/debug_helper.rs)\n";
+
+        let expected = include_str!("../utility/debug-helper.egg")
+            .trim_end()
+            .to_string();
+        let actual = super::debug_helper::fragment();
+        let actual = actual.replace(GENERATED_MARKER, "").trim_end().to_string();
+
+        let diff = if expected == actual {
+            String::new()
+        } else {
+            similar::TextDiff::from_lines(&expected, &actual)
+                .unified_diff()
+                .header(
+                    "utility/debug-helper.egg (generated marker stripped)",
+                    "debug_helper::fragment() (generated marker stripped)",
+                )
+                .to_string()
+        };
+
+        insta::assert_snapshot!(diff, @"");
+    }
+
+    #[test]
+    fn debug_helper_fragment_contains_generated_prefix() {
+        const GENERATED_MARKER: &str =
+            "; (Generated from eggplant Rust: src/eggplant_backend/debug_helper.rs)\n";
+
+        let fragment = super::debug_helper::fragment();
+        let generated_prefix = fragment.as_str();
+
+        assert!(
+            generated_prefix.starts_with(GENERATED_MARKER),
+            "debug_helper::fragment() must mark the generated fragment"
+        );
+
+        for declaration in [
+            "(ruleset debug-deletes)",
+            "((delete (HasType a b)))",
+            "((delete (ContextOf e a)))",
+            "((delete (ExprIsResolved e)))",
+            "((delete (IntT)))",
+        ] {
+            assert!(
+                generated_prefix.contains(declaration),
+                "Generated debug_helper fragment must contain {declaration}"
+            );
+        }
+    }
+
+    #[test]
     fn prologue_parses_migrated_type_analysis_declarations() {
         let program = format!(
             "{}\n(let __rlcr_type (TypeList-ith (TCons (IntT) (TNil)) 0))\n(set (TypeList-length (TLConcat (TNil) (TCons (IntT) (TNil)))) 1)\n(HasType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n(ExpectType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)) \"ok\")\n(HasArgType (Arg (Base (IntT)) (InFunc \"DUMMY\")) (Base (IntT)))\n",
@@ -3601,6 +3677,20 @@ mod tests {
     }
 
     #[test]
+    fn prologue_runs_migrated_debug_helper_rules() {
+        let expr = "(Const (Int 7) (Base (IntT)) (InFunc \"DUMMY\"))";
+        let ty = "(Base (IntT))";
+        let ctx = "(InFunc \"DUMMY\")";
+        let program = format!(
+            "{}\n(let __rlcr_expr {expr})\n(HasType __rlcr_expr {ty})\n(ContextOf __rlcr_expr {ctx})\n(run-schedule debug-deletes)\n(fail (check (HasType __rlcr_expr {ty})))\n(fail (check (ContextOf __rlcr_expr {ctx})))\n",
+            crate::prologue()
+        );
+
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    #[test]
     fn prologue_matches_text_backend_except_generated_schema_and_type_analysis_sections() {
         let expected = crate::prologue_egglog_text();
         let actual = crate::prologue();
@@ -3663,6 +3753,8 @@ mod tests {
         let actual = strip_conditional_invariant_code_motion_generated_sections(&actual);
         let expected = strip_conditional_push_in_generated_sections(&expected);
         let actual = strip_conditional_push_in_generated_sections(&actual);
+        let expected = strip_debug_helper_generated_sections(&expected);
+        let actual = strip_debug_helper_generated_sections(&actual);
 
         let diff = if expected == actual {
             String::new()
