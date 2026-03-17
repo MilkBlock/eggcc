@@ -225,6 +225,30 @@ mod native_tests {
         termdag.to_string(&extracted)
     }
 
+    fn eval_and_extract_native_feature_expr(
+        prologue: &str,
+        expr: &str,
+        schedule: &str,
+        ablate: Option<&str>,
+    ) -> String {
+        let binding = "__feature_native_expr";
+        let initialization = format!("(let {binding} {expr})");
+        let egraph = crate::run_egglog_program_with_native_rules(
+            prologue,
+            &initialization,
+            schedule,
+            ablate,
+        )
+        .unwrap();
+
+        let mut termdag = TermDag::default();
+        let (sort, value) = egraph
+            .eval_expr(&EgglogExpr::Var(egglog::ast::Span::Panic, binding.into()))
+            .unwrap();
+        let (_, extracted) = egraph.extract(value, &mut termdag, &sort).unwrap();
+        termdag.to_string(&extracted)
+    }
+
     fn dummy_ctx() -> schema_dsl::Assumption<PeepholeTx, schema_dsl::InFuncTy> {
         schema_dsl::InFunc::new("DUMMY".to_string())
     }
@@ -331,5 +355,76 @@ mod native_tests {
             PeepholeTx::canonical_raw(&select_expected),
             "typed select peephole should simplify without the text prologue",
         );
+    }
+
+    #[test]
+    fn feature_path_uses_native_peepholes_when_text_rules_are_absent() {
+        let x_tuple_ty = ast::tuplet_vec(vec![ast::intt(), ast::intt(), ast::statet()]);
+        let expr = ast::add(
+            ast::int_ty(0, x_tuple_ty.clone()),
+            ast::get(ast::arg_ty(x_tuple_ty.clone()), 0),
+        );
+        let schedule = format!(
+            "(run-schedule\n{}\npeepholes\n{})",
+            crate::schedule::helpers(),
+            crate::schedule::helpers()
+        );
+
+        let simplified = eval_and_extract_native_feature_expr(
+            &crate::native_execution_prologue(),
+            &expr.to_string(),
+            &schedule,
+            None,
+        );
+        let ablated = eval_and_extract_native_feature_expr(
+            &crate::native_execution_prologue(),
+            &expr.to_string(),
+            &crate::ablate_schedule(&schedule, "peepholes"),
+            Some("peepholes"),
+        );
+        let expected = eval_and_extract_expr(
+            &crate::prologue_egglog_text(),
+            &ast::get(ast::arg_ty(x_tuple_ty), 0).to_string(),
+            "",
+        );
+
+        assert_eq!(simplified, expected);
+        assert_ne!(
+            ablated, expected,
+            "ablating the native peepholes ruleset should remove the simplification from the feature path",
+        );
+    }
+
+    #[test]
+    fn native_feature_path_matches_text_backend_for_fixed_input() {
+        let x_tuple_ty = ast::tuplet_vec(vec![ast::intt(), ast::intt(), ast::statet()]);
+        let zero = ast::int_ty(0, x_tuple_ty.clone());
+        let one = ast::int_ty(1, x_tuple_ty.clone());
+        let two = ast::int_ty(2, x_tuple_ty.clone());
+        let x = ast::get(ast::arg_ty(x_tuple_ty.clone()), 0);
+        let y = ast::get(ast::arg_ty(x_tuple_ty.clone()), 1);
+        let expr = ast::add(
+            ast::add(ast::add(zero.clone(), x.clone()), zero),
+            ast::add(
+                ast::add(one, two),
+                ast::mul(y, ast::int_ty(1, x_tuple_ty.clone())),
+            ),
+        );
+        let schedule = format!(
+            "(run-schedule\n{}\npeepholes\n{})",
+            crate::schedule::helpers(),
+            crate::schedule::helpers()
+        );
+
+        let text_extracted =
+            eval_and_extract_expr(&crate::prologue_egglog_text(), &expr.to_string(), &schedule);
+        let native_extracted = eval_and_extract_native_feature_expr(
+            &crate::native_execution_prologue(),
+            &expr.to_string(),
+            &schedule,
+            None,
+        );
+
+        assert_eq!(native_extracted, text_extracted);
     }
 }

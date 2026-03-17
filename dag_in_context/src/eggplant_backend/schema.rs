@@ -1,11 +1,11 @@
 pub(crate) fn fragment() -> String {
     let schema = inject_expr_section(SCHEMA_EGGLOG, &super::schema_dsl::expr_section());
     let schema = inject_list_expr_section(&schema, "");
-    let schema = inject_types_section(&schema, "");
-    let schema = inject_assumptions_section(&schema, "");
-    let schema = inject_constants_section(&schema, "");
+    let schema = inject_types_section(&schema, &super::schema_dsl::types_section());
+    let schema = inject_assumptions_section(&schema, &super::schema_dsl::assumptions_section());
+    let schema = inject_constants_section(&schema, &super::schema_dsl::constants_section());
     let schema = remove_leaf_node_expr_constructors(&schema);
-    let schema = inject_operators_section(&schema, "");
+    let schema = inject_operators_section(&schema, &super::schema_dsl::operators_section());
     let schema = inject_tuple_operations_section(&schema, "");
     let schema = inject_control_flow_section(&schema, "");
     let schema = inject_program_type_section(&schema, &super::schema_dsl::program_type_section());

@@ -258,6 +258,22 @@ pub(crate) fn expr_section() -> String {
     ])
 }
 
+pub(crate) fn types_section() -> String {
+    datatypes_section(&["BaseType", "TypeList", "Type"])
+}
+
+pub(crate) fn assumptions_section() -> String {
+    datatypes_section(&["Assumption"])
+}
+
+pub(crate) fn constants_section() -> String {
+    datatypes_section(&["Constant"])
+}
+
+pub(crate) fn operators_section() -> String {
+    datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
+}
+
 pub(crate) fn program_type_section() -> String {
     datatypes_section(&["ProgramType"])
 }

@@ -18,7 +18,7 @@ mod mem_simple;
 mod memory;
 mod non_weakly_linear;
 mod passthrough;
-mod peepholes;
+pub(crate) mod peepholes;
 mod purity_analysis;
 mod rec_to_loop;
 mod schema;
@@ -79,6 +79,56 @@ pub(crate) fn prologue() -> String {
         crate::schedule::rulesets(),
     ]
     .join("\n")
+}
+
+#[cfg(feature = "eggplant")]
+pub(crate) fn native_execution_prologue() -> String {
+    vec![
+        schema::fragment(),
+        type_analysis::fragment(),
+        util::fragment(),
+        terms::fragment(),
+        crate::optimizations::is_valid::rules().join("\n"),
+        crate::optimizations::is_resolved::rules().join("\n"),
+        crate::optimizations::body_contains::rules().join("\n"),
+        purity_analysis::fragment(),
+        add_context::fragment(),
+        context_prop::fragment(),
+        term_subst::fragment(),
+        context_of::fragment(),
+        subst::fragment(),
+        canonicalize::fragment(),
+        expr_size::fragment(),
+        drop_at::fragment(),
+        interval_analysis::fragment(),
+        switch_rewrites::fragment(),
+        select::fragment(),
+        crate::optimizations::memory::rules(),
+        memory::fragment(),
+        mem_simple::fragment(),
+        loop_invariant::rules(),
+        loop_simplify::fragment(),
+        loop_unroll::fragment(),
+        swap_if::fragment(),
+        rec_to_loop::fragment(),
+        passthrough::fragment(),
+        loop_strength_reduction::fragment(),
+        ivt::fragment(),
+        conditional_invariant_code_motion::fragment(),
+        conditional_push_in::fragment(),
+        debug_helper::fragment(),
+        hackers_delight::fragment(),
+        non_weakly_linear::fragment(),
+        crate::schedule::rulesets(),
+    ]
+    .join("\n")
+}
+
+#[cfg(feature = "eggplant")]
+pub(crate) fn register_native_rules(ablate: Option<&str>) {
+    if ablate != Some("peepholes") {
+        let _ = peepholes::native::register_native_rules("peepholes");
+    }
 }
 
 #[cfg(test)]

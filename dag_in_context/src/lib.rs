@@ -117,6 +117,11 @@ pub(crate) fn prologue_egglog_text() -> String {
     .join("\n")
 }
 
+#[cfg(feature = "eggplant")]
+fn native_execution_prologue() -> String {
+    eggplant_backend::native_execution_prologue()
+}
+
 fn ablate_prologue(prologue: &str, ablate: &str) -> String {
     let mut found_ruleset = false;
     let lines: Vec<String> = prologue
@@ -218,6 +223,42 @@ pub fn build_program(
     ablate: Option<&str>,
     use_context: bool,
 ) -> String {
+    let built = build_program_parts(program, inline_program, fns, schedule, ablate, use_context);
+
+    format!(
+        "
+; Prologue
+{prologue}
+
+; required by function_inlining_unoins
+; Function inlining unions
+(relation InlinedCall (String Expr))
+
+{initialization}
+
+; Schedule
+{schedule}
+",
+        prologue = built.prologue,
+        initialization = built.initialization,
+        schedule = built.schedule
+    )
+}
+
+struct BuiltProgramParts {
+    prologue: String,
+    initialization: String,
+    schedule: String,
+}
+
+fn build_program_parts(
+    program: &TreeProgram,
+    inline_program: Option<&TreeProgram>,
+    fns: &[String],
+    schedule: &str,
+    ablate: Option<&str>,
+    use_context: bool,
+) -> BuiltProgramParts {
     // inlining first before adding context
     let to_inline = inline_program.unwrap_or(program);
     let inlined = if inline_program.is_some() {
@@ -274,6 +315,7 @@ pub fn build_program(
     }
 
     let prologue = prologue();
+
     let (prologue, schedule) = if let Some(ablate) = ablate {
         (
             ablate_prologue(&prologue, ablate),
@@ -289,32 +331,15 @@ pub fn build_program(
         prologue
     };
 
-    format!(
-        "
-; Prologue
-{prologue}
+    let initialization = format!(
+        "(ruleset initialization)\n(rule () (\n    ; Program nodes\n    {printed}\n\n    ; Loop context unions\n    {loop_context_unions}\n\n    ; Function inlining unions\n    {function_inlining_unions}\n) :ruleset initialization)\n(run initialization 1)"
+    );
 
-; required by function_inlining_unoins
-; Function inlining unions
-(relation InlinedCall (String Expr))
-
-(ruleset initialization)
-(rule () (
-    ; Program nodes
-    {printed}
-
-    ; Loop context unions
-    {loop_context_unions}
-
-    ; Function inlining unions
-    {function_inlining_unions}
-) :ruleset initialization)
-(run initialization 1) 
-
-; Schedule
-{schedule}
-"
-    )
+    BuiltProgramParts {
+        prologue,
+        initialization,
+        schedule,
+    }
 }
 
 pub fn are_progs_eq(program1: TreeProgram, program2: TreeProgram) -> bool {
@@ -901,12 +926,39 @@ pub fn optimize(
             );
 
             log::info!("Running egglog program...");
-            let mut egraph = egglog::EGraph::default();
-            egraph.parse_and_run_program(None, &egglog_prog)?;
+            #[cfg(feature = "eggplant")]
+            let (serialized, unextractables, serialization_duration) = {
+                let built = build_program_parts(
+                    &res,
+                    inline_program.as_ref(),
+                    &batch,
+                    schedule.egglog_schedule(),
+                    eggcc_config.ablate.as_deref(),
+                    eggcc_config.use_context,
+                );
+                let native_prologue = match eggcc_config.ablate.as_deref() {
+                    Some("peepholes") | None => native_execution_prologue(),
+                    Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
+                };
+                let serialization_start = Instant::now();
+                let egraph = run_egglog_program_with_native_rules(
+                    &native_prologue,
+                    &built.initialization,
+                    &built.schedule,
+                    eggcc_config.ablate.as_deref(),
+                )?;
+                let serialized = serialized_egraph(egraph);
+                (serialized.0, serialized.1, serialization_start.elapsed())
+            };
 
-            let serialization_start = Instant::now();
-            let (serialized, unextractables) = serialized_egraph(egraph);
-            let serialization_duration = serialization_start.elapsed();
+            #[cfg(not(feature = "eggplant"))]
+            let (serialized, unextractables, serialization_duration) = {
+                let mut egraph = egglog::EGraph::default();
+                egraph.parse_and_run_program(None, &egglog_prog)?;
+                let serialization_start = Instant::now();
+                let (serialized, unextractables) = serialized_egraph(egraph);
+                (serialized, unextractables, serialization_start.elapsed())
+            };
 
             if let Some(dir) = eggcc_config.egraph_dump_dir.as_ref() {
                 tiger_dump_counter += 1;
@@ -976,6 +1028,27 @@ pub fn optimize(
             extract_region_timings,
         },
     ))
+}
+
+#[cfg(feature = "eggplant")]
+pub(crate) fn run_egglog_program_with_native_rules(
+    prologue: &str,
+    initialization: &str,
+    schedule: &str,
+    ablate: Option<&str>,
+) -> std::result::Result<egglog::EGraph, egglog::Error> {
+    use eggplant::wrap::NonPatRecSgl;
+
+    let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
+    let mut guard = egraph.lock().unwrap();
+    *guard = egglog::EGraph::default();
+    guard.parse_and_run_program(None, prologue)?;
+    guard.parse_and_run_program(None, initialization)?;
+    eggplant_backend::register_native_rules(ablate);
+    guard.parse_and_run_program(None, schedule)?;
+    let egraph = std::mem::take(&mut *guard);
+    drop(guard);
+    Ok(egraph)
 }
 
 fn check_program_gets_type(program: TreeProgram) -> Result {
