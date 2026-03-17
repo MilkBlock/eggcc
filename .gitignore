@@ -40,3 +40,7 @@ runtime/rt.o
 dag_in_context/src/tiger/getjsoninput.sh
 dag_in_context/src/tiger/bak.cpp
 dag_in_context/src/tiger/main
+
+# Local development files
+.cargo/
+PLAN2_DRAFT.md
