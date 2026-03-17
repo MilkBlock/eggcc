@@ -111,6 +111,29 @@ MyTx::add_rule(
 
 当前已包含一个“固定输入 + 提取结果”的语义对比测试（在 `--features eggplant` 下运行），作为后续逐步替换文本 diff 的基础。
 
+## 迁移完成后的后端决策
+
+当前编译流程中的 `.egg` 文件已经全部迁移到 `src/eggplant_backend/` 的 Rust fragment。
+迁移完成后的结论如下：
+
+- 暂不切换默认 backend。
+  - 默认路径继续保留为 `prologue_egglog_text()`。
+  - `--features eggplant` 继续显式选择 `eggplant_backend::prologue()`。
+- 暂不移除 `.egg` 文本 backend。
+  - 该路径仍然是 AC-2 所要求的对照实现，也是定位回归最直接的 reference。
+  - 现有 `prologue_egglog_text()` 与 `eggplant_backend::prologue()` 的 diff / semantic tests 仍依赖这条路径。
+- 切换默认 backend 的前提：
+  1. 在非 sandbox 环境或 CI 中补齐 AC-1 证据，完成 repo root 的 `make nits` 与 `make test`。
+  2. 确认默认路径切换后不会削弱旧文本 backend 作为 reference 的作用；如果切换默认，仍需保留可选的文本 backend 入口用于比较与回归定位。
+  3. 处理已知 cleanup 项（例如仍通过 `include_str!` 承载原 `.egg` 内容的 fragment 模块），确保最终状态明确且一致。
+
+换句话说，当前推荐状态是：
+
+- `default` = 文本 backend（稳定 reference）
+- `--features eggplant` = Rust backend（迁移后的实现）
+
+待 AC-1 在完整环境中可验证后，再单独发起“是否切换默认 backend / 是否移除文本 prologue 路径”的收尾变更。
+
 ## Unsupported 语法/能力的处理
 
 遇到 eggplant/翻译技能暂不支持的语法或能力：
