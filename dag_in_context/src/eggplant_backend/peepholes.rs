@@ -65,3 +65,137 @@ const PEEPHOLES: &str = r#"; Simple rewrites that don't do a ton with control fl
 (rewrite (Bop (PtrAdd) (Bop (PtrAdd) p x) y)
          (Bop (PtrAdd) p (Bop (Add) x y))
          :ruleset peepholes)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use eggplant::{prelude::*, tx_rx_vt_pr};
+
+    #[eggplant::dsl]
+    pub enum PeepholeExpr {
+        PIntConst {
+            num: i64,
+        },
+        PAdd {
+            l: PeepholeExpr,
+            r: PeepholeExpr,
+        },
+        PMul {
+            l: PeepholeExpr,
+            r: PeepholeExpr,
+        },
+        PSelect {
+            pred: PeepholeExpr,
+            thn: PeepholeExpr,
+            els: PeepholeExpr,
+        },
+    }
+
+    tx_rx_vt_pr!(PeepholeTx, PeepholePatRec);
+
+    #[allow(dead_code)]
+    pub(crate) fn register_native_rules(ruleset_name: &'static str) -> RuleSetId {
+        let ruleset = PeepholeTx::new_ruleset(ruleset_name);
+
+        PeepholeTx::add_rule(
+            "add_zero_lhs",
+            ruleset,
+            || {
+                let x = PeepholeExpr::query_leaf();
+                let z = PIntConst::query().num(&0);
+                let add = PAdd::query(&z, &x);
+                #[eggplant::pat_vars_catch]
+                struct AddZeroLhsPat {
+                    x: PeepholeExpr,
+                    z: PIntConst,
+                    add: PAdd,
+                }
+            },
+            |ctx, pat| {
+                let _ = ctx.devalue(pat.z.num);
+                ctx.union(pat.add, pat.x);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "mul_one_rhs",
+            ruleset,
+            || {
+                let x = PeepholeExpr::query_leaf();
+                let one = PIntConst::query().num(&1);
+                let mul = PMul::query(&x, &one);
+                #[eggplant::pat_vars_catch]
+                struct MulOneRhsPat {
+                    x: PeepholeExpr,
+                    one: PIntConst,
+                    mul: PMul,
+                }
+            },
+            |ctx, pat| {
+                let _ = ctx.devalue(pat.one.num);
+                ctx.union(pat.mul, pat.x);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "select_same_arms",
+            ruleset,
+            || {
+                let pred = PeepholeExpr::query_leaf();
+                let x = PeepholeExpr::query_leaf();
+                let select = PSelect::query(&pred, &x, &x);
+                #[eggplant::pat_vars_catch]
+                struct SelectSamePat {
+                    pred: PeepholeExpr,
+                    x: PeepholeExpr,
+                    select: PSelect,
+                }
+            },
+            |ctx, pat| {
+                let _ = pat.pred;
+                ctx.union(pat.select, pat.x);
+            },
+        );
+
+        ruleset
+    }
+}
+
+#[cfg(all(test, feature = "eggplant"))]
+mod native_tests {
+    use super::native::{
+        register_native_rules, PAdd, PIntConst, PMul, PSelect, PeepholeExpr, PeepholeTx,
+    };
+    use eggplant::prelude::{Commit, RuleRunnerSgl, RunConfig, TxSgl};
+
+    #[test]
+    fn native_peepholes_run_without_text_prologue() {
+        let ruleset = register_native_rules("native_peepholes_round0");
+
+        let arithmetic: PeepholeExpr<PeepholeTx, _> = PAdd::new(
+            &PIntConst::new(0),
+            &PMul::new(&PIntConst::new(7), &PIntConst::new(1)),
+        );
+        arithmetic.commit();
+        let arithmetic_expected: PeepholeExpr<PeepholeTx, _> = PIntConst::new(7);
+        arithmetic_expected.commit();
+
+        let select_expr: PeepholeExpr<PeepholeTx, _> =
+            PSelect::new(&PIntConst::new(1), &PIntConst::new(9), &PIntConst::new(9));
+        select_expr.commit();
+        let select_expected: PeepholeExpr<PeepholeTx, _> = PIntConst::new(9);
+        select_expected.commit();
+
+        PeepholeTx::run_ruleset(ruleset, RunConfig::Sat);
+
+        assert_eq!(
+            PeepholeTx::canonical_raw(&arithmetic),
+            PeepholeTx::canonical_raw(&arithmetic_expected),
+            "typed arithmetic peepholes should simplify without the text prologue",
+        );
+        assert_eq!(
+            PeepholeTx::canonical_raw(&select_expr),
+            PeepholeTx::canonical_raw(&select_expected),
+            "typed select peephole should simplify without the text prologue",
+        );
+    }
+}

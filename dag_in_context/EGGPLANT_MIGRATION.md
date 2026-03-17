@@ -111,6 +111,59 @@ MyTx::add_rule(
 
 当前已包含一个“固定输入 + 提取结果”的语义对比测试（在 `--features eggplant` 下运行），作为后续逐步替换文本 diff 的基础。
 
+## Backend Status Map
+
+为了避免把“Rust 文件里的 egglog 字符串”误记为“已经原生 eggplant 化”，当前 backend 状态按下面规则记录：
+
+- `eggplant-native`
+  - 主语义通过 typed DSL / typed rules 表达，不依赖 raw egglog 文本作为唯一实现来源。
+- `text-wrapped`
+  - 仍然以 raw egglog 文本或 Rust 生成的 egglog 文本驱动生产路径；可以带有辅助性 Rust 代码，但不能据此声称已经完成原生迁移。
+- `marker-only`
+  - 目前只有 generated marker 或占位实现，尚未形成可比对的真实规则迁移。
+
+当前分类：
+
+- `eggplant-native`
+  - `src/eggplant_backend/schema_dsl.rs`
+- `text-wrapped`
+  - `src/eggplant_backend/schema.rs`
+  - `src/eggplant_backend/type_analysis.rs`
+  - `src/eggplant_backend/util.rs`
+  - `src/eggplant_backend/terms.rs`
+  - `src/eggplant_backend/purity_analysis.rs`
+  - `src/eggplant_backend/add_context.rs`
+  - `src/eggplant_backend/context_of.rs`
+  - `src/eggplant_backend/subst.rs`
+  - `src/eggplant_backend/canonicalize.rs`
+  - `src/eggplant_backend/expr_size.rs`
+  - `src/eggplant_backend/drop_at.rs`
+  - `src/eggplant_backend/interval_analysis.rs`
+  - `src/eggplant_backend/switch_rewrites.rs`
+  - `src/eggplant_backend/select.rs`
+  - `src/eggplant_backend/peepholes.rs`
+  - `src/eggplant_backend/memory.rs`
+  - `src/eggplant_backend/mem_simple.rs`
+  - `src/eggplant_backend/loop_invariant.rs`
+  - `src/eggplant_backend/loop_unroll.rs`
+  - `src/eggplant_backend/swap_if.rs`
+  - `src/eggplant_backend/rec_to_loop.rs`
+  - `src/eggplant_backend/passthrough.rs`
+  - `src/eggplant_backend/loop_strength_reduction.rs`
+  - `src/eggplant_backend/ivt.rs`
+  - `src/eggplant_backend/conditional_invariant_code_motion.rs`
+  - `src/eggplant_backend/conditional_push_in.rs`
+  - `src/eggplant_backend/debug_helper.rs`
+  - `src/eggplant_backend/hackers_delight.rs`
+  - `src/eggplant_backend/non_weakly_linear.rs`
+- `marker-only`
+  - `src/eggplant_backend/context_prop.rs`
+  - `src/eggplant_backend/loop_simplify.rs`
+
+说明：
+
+- `src/eggplant_backend/peepholes.rs` 现在包含一个 feature-gated typed-rule prototype 和直接 `run_ruleset` 测试，但当前生产 backend 仍通过 `fragment()` 文本接入，因此它暂时继续归类为 `text-wrapped`，直到主运行路径切换为 typed execution。
+
 ## 迁移完成后的后端决策
 
 当前编译流程中的 `.egg` 文件已经全部迁移到 `src/eggplant_backend/` 的 Rust fragment。
