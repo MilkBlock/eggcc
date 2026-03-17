@@ -1,0 +1,97 @@
+pub(crate) fn fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(CONDITIONAL_PUSH_IN);
+    out.push('\n');
+    out
+}
+
+const GENERATED_MARKER: &str =
+    "; (Generated from eggplant Rust: src/eggplant_backend/conditional_push_in.rs)\n";
+const CONDITIONAL_PUSH_IN: &str = r#"(ruleset push-in)
+
+; new version of the rule where one side of bop is constant
+(rule (
+        (= if_e (If pred orig_inputs thn els))
+        (ContextOf if_e outer_ctx)
+        (= (Bop o (Const c ty outer_ctx) x) (Get orig_inputs i))
+        (HasArgType thn (TupleT tylist))
+        (HasArgType els (TupleT tylist))
+        (HasType x (Base x_ty))
+        ; ensure pure type for weak linearity
+        (PureBaseType x_ty)
+        (= orig_ins_len (TypeList-length tylist))
+      )
+      (
+        (RELIESONCONTEXT)
+        ; New inputs
+        (let new_ins (Concat orig_inputs (Single x)))
+        (let new_ins_ty (TupleT (TLConcat tylist (TCons x_ty (TNil)))))
+
+        ; New contexts
+        (let if_tr (InIf true  pred new_ins))
+        (let if_fa (InIf false pred new_ins))
+
+        ; New args
+        (let arg_tr (Arg new_ins_ty if_tr))
+        (let arg_fa (Arg new_ins_ty if_fa))
+
+        ; SubTuple
+        (let st_tr (SubTuple arg_tr 0 orig_ins_len))
+        (let st_fa (SubTuple arg_fa 0 orig_ins_len))
+
+        ; New regions
+        (let new_thn (Subst if_tr st_tr thn))
+        (let new_els (Subst if_fa st_fa els))
+
+        ; Union the original input with Bop(c, x) in the new regions
+        (union (Get arg_tr i) (Bop o (Const c new_ins_ty if_tr) (Get arg_tr orig_ins_len)))
+        (union (Get arg_fa i) (Bop o (Const c new_ins_ty if_fa) (Get arg_fa orig_ins_len)))
+
+        ; Union the ifs
+        (union if_e (If pred new_ins new_thn new_els))
+      )
+      :ruleset push-in)
+
+
+; OLD VERSION - Too slow for now
+; ; push bop input into region
+; (rule (
+;         (= if_e (If pred orig_inputs thn els))
+;         (ContextOf if_e outer_ctx)
+;         (= (Bop o x y) (Get orig_inputs i))
+;         (HasArgType thn (TupleT tylist))
+;         (HasArgType els (TupleT tylist))
+;         (HasType x (Base x_ty))
+;         (HasType y (Base y_ty))
+;       )
+;       (
+;         ; New inputs
+;         (let new_ins (Concat orig_inputs (Concat (Single x) (Single y))))
+;         (let new_ins_ty (TupleT (TLConcat tylist (TCons x_ty (TCons y_ty (TNil))))))
+
+;         ; New contexts
+;         (let if_tr (InIf true  pred new_ins))
+;         (let if_fa (InIf false pred new_ins))
+        
+;         ; New args
+;         (let arg_tr (Arg new_ins_ty if_tr))
+;         (let arg_fa (Arg new_ins_ty if_fa))
+
+;         ; SubTuple
+;         (let orig_ins_len (TypeList-length tylist))
+;         (let st_tr (SubTuple arg_tr 0 orig_ins_len))
+;         (let st_fa (SubTuple arg_fa 0 orig_ins_len))
+
+;         ; New regions
+;         (let new_thn (Subst if_tr st_tr thn))
+;         (let new_els (Subst if_fa st_fa els))
+
+;         ; Union the original input with Bop(x, y) in the new regions
+;         (union (Get arg_tr i) (Bop o (Get arg_tr orig_ins_len) (Get arg_tr (+ orig_ins_len 1))))
+;         (union (Get arg_fa i) (Bop o (Get arg_fa orig_ins_len) (Get arg_fa (+ orig_ins_len 1))))
+
+;         ; Union the ifs
+;         (union if_e (If pred new_ins new_thn new_els))
+;       )
+;       :ruleset push-in)"#;
