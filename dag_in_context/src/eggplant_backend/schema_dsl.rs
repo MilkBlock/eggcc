@@ -3,7 +3,7 @@ use eggplant::egglog;
 use eggplant::prelude::{RustSpan, Span};
 
 #[eggplant::dsl]
-enum BaseType {
+pub(crate) enum BaseType {
     IntT {},
     BoolT {},
     FloatT {},
@@ -12,20 +12,20 @@ enum BaseType {
 }
 
 #[eggplant::dsl]
-enum TypeList {
+pub(crate) enum TypeList {
     TNil {},
     TCons { head: BaseType, tail: TypeList },
 }
 
 #[eggplant::dsl]
-enum Type {
+pub(crate) enum Type {
     Base { ty: BaseType },
     TupleT { tys: TypeList },
     TmpType {},
 }
 
 #[eggplant::dsl]
-enum Expr {
+pub(crate) enum Expr {
     Opaque {},
     Arg {
         ty: Type,
@@ -100,13 +100,13 @@ enum Expr {
 }
 
 #[eggplant::dsl]
-enum ListExpr {
+pub(crate) enum ListExpr {
     Cons { head: Expr, tail: ListExpr },
     Nil {},
 }
 
 #[eggplant::dsl]
-enum Term {
+pub(crate) enum Term {
     OpaqueTerm {},
     TermArg {},
     TermConst {
@@ -152,13 +152,13 @@ enum Term {
 }
 
 #[eggplant::dsl]
-enum ListTerm {
+pub(crate) enum ListTerm {
     TermCons { head: Term, tail: ListTerm },
     TermNil {},
 }
 
 #[eggplant::dsl]
-enum ProgramType {
+pub(crate) enum ProgramType {
     Program {
         entry: Expr,
         other_functions: ListExpr,
@@ -166,7 +166,7 @@ enum ProgramType {
 }
 
 #[eggplant::dsl(base = bool)]
-enum Assumption {
+pub(crate) enum Assumption {
     InFunc {
         name: String,
     },
@@ -187,20 +187,20 @@ enum Assumption {
 }
 
 #[eggplant::dsl(base = bool)]
-enum Constant {
+pub(crate) enum Constant {
     Int { value: i64 },
     Bool { value: bool },
     Float { value: f64 },
 }
 
 #[eggplant::dsl]
-enum TernaryOp {
+pub(crate) enum TernaryOp {
     Write {},
     Select {},
 }
 
 #[eggplant::dsl]
-enum BinaryOp {
+pub(crate) enum BinaryOp {
     Bitand {},
     Add {},
     Sub {},
@@ -235,7 +235,7 @@ enum BinaryOp {
 }
 
 #[eggplant::dsl]
-enum UnaryOp {
+pub(crate) enum UnaryOp {
     Neg {},
     Abs {},
     Not {},

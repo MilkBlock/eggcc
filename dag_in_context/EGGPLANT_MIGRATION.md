@@ -162,7 +162,7 @@ MyTx::add_rule(
 
 说明：
 
-- `src/eggplant_backend/peepholes.rs` 现在包含一个 feature-gated typed-rule prototype 和直接 `run_ruleset` 测试，但当前生产 backend 仍通过 `fragment()` 文本接入，因此它暂时继续归类为 `text-wrapped`，直到主运行路径切换为 typed execution。
+- `src/eggplant_backend/peepholes.rs` 现在包含一个基于真实 `schema_dsl` 的 feature-gated typed-rule prototype，以及与当前 text backend 对齐的固定输入测试；但当前生产 backend 仍通过 `fragment()` 文本接入，因此它暂时继续归类为 `text-wrapped`，直到主运行路径切换为 typed execution。
 
 ## 迁移完成后的后端决策
 
