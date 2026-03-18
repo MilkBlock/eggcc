@@ -336,6 +336,22 @@ pub fn serialized_egraph(
     (egraph, get_unextractables(&egglog_egraph))
 }
 
+#[cfg(feature = "eggplant")]
+pub fn serialized_egraph_native(
+    egglog_egraph: eggplant::egglog::EGraph,
+) -> (egraph_serialize::EGraph, IndexSet<String>) {
+    let config = eggplant::egglog::SerializeConfig::default();
+    let native = egglog_egraph.serialize(config).egraph;
+    let json = serde_json::to_string(&native)
+        .expect("eggplant-native serialized egraph should serialize to JSON");
+    let egraph = serde_json::from_str(&json)
+        .expect("eggplant-native serialized egraph should match local egraph_serialize schema");
+
+    // The native feature path currently uses the serialized graph for extraction.
+    // Unextractable metadata is not exposed on eggplant's bundled EGraph API.
+    (egraph, IndexSet::default())
+}
+
 type Cost = NotNan<f64>;
 type CostSetIndex = usize;
 

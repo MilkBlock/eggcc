@@ -226,6 +226,37 @@ mod native_tests {
         termdag.to_string(&extracted)
     }
 
+    fn text_backend_exprs_are_equivalent(
+        prologue: &str,
+        lhs: &str,
+        rhs: &str,
+        schedule: &str,
+    ) -> bool {
+        let lhs_binding = "__typed_peepholes_lhs";
+        let rhs_binding = "__typed_peepholes_rhs";
+        let program = format!(
+            "{prologue}\n(let {lhs_binding} {lhs})\n(let {rhs_binding} {rhs})\n{schedule}\n"
+        );
+
+        let mut egraph = EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+
+        let (_, lhs_value) = egraph
+            .eval_expr(&EgglogExpr::Var(
+                egglog::ast::Span::Panic,
+                lhs_binding.into(),
+            ))
+            .unwrap();
+        let (_, rhs_value) = egraph
+            .eval_expr(&EgglogExpr::Var(
+                egglog::ast::Span::Panic,
+                rhs_binding.into(),
+            ))
+            .unwrap();
+
+        lhs_value == rhs_value
+    }
+
     fn eval_and_extract_native_feature_expr(
         prologue: &str,
         expr: &str,
@@ -234,7 +265,9 @@ mod native_tests {
     ) -> String {
         let binding = "__feature_native_expr";
         let initialization = format!("(let {binding} {expr})");
-        let egraph = crate::run_egglog_program_with_native_rules(
+        use eggplant::egglog::ast::Expr as NativeEgglogExpr;
+
+        let mut egraph = crate::run_egglog_program_with_native_rules(
             prologue,
             &initialization,
             schedule,
@@ -242,12 +275,21 @@ mod native_tests {
         )
         .unwrap();
 
-        let mut termdag = TermDag::default();
         let (sort, value) = egraph
-            .eval_expr(&EgglogExpr::Var(egglog::ast::Span::Panic, binding.into()))
+            .eval_expr(&NativeEgglogExpr::Var(
+                eggplant::egglog::ast::Span::Panic,
+                binding.into(),
+            ))
             .unwrap();
-        let (_, extracted) = egraph.extract(value, &mut termdag, &sort).unwrap();
+        let (termdag, extracted, _) = egraph.extract_value(&sort, value).unwrap();
         termdag.to_string(&extracted)
+    }
+
+    fn peephole_feature_schedule() -> String {
+        format!(
+            "(run-schedule\n{}\n(saturate is-resolved)\n(saturate canon)\n(saturate interval-analysis)\npeepholes\n)",
+            crate::schedule::types_and_indexing()
+        )
     }
 
     fn dummy_ctx() -> schema_dsl::Assumption<PeepholeTx, schema_dsl::InFuncTy> {
@@ -368,11 +410,7 @@ mod native_tests {
             ast::int_ty(0, x_tuple_ty.clone()),
             ast::get(ast::arg_ty(x_tuple_ty.clone()), 0),
         );
-        let schedule = format!(
-            "(run-schedule\n{}\npeepholes\n{})",
-            crate::schedule::helpers(),
-            crate::schedule::helpers()
-        );
+        let schedule = peephole_feature_schedule();
 
         let simplified = eval_and_extract_native_feature_expr(
             &crate::feature_execution_prologue(true, None),
@@ -415,11 +453,7 @@ mod native_tests {
                 ast::mul(y, ast::int_ty(1, x_tuple_ty.clone())),
             ),
         );
-        let schedule = format!(
-            "(run-schedule\n{}\npeepholes\n{})",
-            crate::schedule::helpers(),
-            crate::schedule::helpers()
-        );
+        let schedule = peephole_feature_schedule();
 
         let text_extracted =
             eval_and_extract_expr(&crate::prologue_egglog_text(), &expr.to_string(), &schedule);
@@ -430,13 +464,24 @@ mod native_tests {
             None,
         );
 
-        assert_eq!(native_extracted, text_extracted);
+        assert!(
+            text_backend_exprs_are_equivalent(
+                &crate::prologue_egglog_text(),
+                &native_extracted,
+                &text_extracted,
+                &schedule,
+            ),
+            "native and text backends should land in the same text-backend e-class even when extraction picks different representatives",
+        );
     }
 
     #[test]
     fn native_feature_runner_smoke_executes_without_deadlocking() {
         let _guard = test_lock::lock();
-        let schedule = format!("(run-schedule\n{}\n)", crate::schedule::helpers());
+        let schedule = format!(
+            "(run-schedule\n{}\n(saturate is-resolved)\n)",
+            crate::schedule::types_and_indexing()
+        );
         let extracted = eval_and_extract_native_feature_expr(
             &crate::feature_execution_prologue(true, None),
             "(Const (Int 7) (Base (IntT)) (InFunc \"RLCR\"))",

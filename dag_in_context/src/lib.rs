@@ -119,7 +119,7 @@ pub(crate) fn prologue_egglog_text() -> String {
 
 #[cfg(feature = "eggplant")]
 fn native_execution_prologue() -> String {
-    eggplant_backend::native_execution_prologue()
+    strip_unsupported_native_extract_actions(&eggplant_backend::native_execution_prologue())
 }
 
 #[cfg(feature = "eggplant")]
@@ -175,6 +175,30 @@ fn ablate_schedule(schedule: &str, ablate: &str) -> String {
 
     assert!(found_schedule, "No schedule {} found to ablate", ablate);
     lines.join("\n")
+}
+
+#[cfg(feature = "eggplant")]
+fn strip_unsupported_native_extract_actions(program: &str) -> String {
+    program
+        .replace(
+            r#"((extract "Expecting expression")
+       (extract e)
+       (extract "to have type")
+       (extract expected)
+       (extract "but got type")
+       (extract actual)
+       (extract "with message")
+       (extract msg)
+       (panic "type mismatch- check RUST_LOG=info for expressions that mismatched"))"#,
+            r#"((panic "type mismatch- check RUST_LOG=info for expressions that mismatched"))"#,
+        )
+        .replace(
+            r#"((extract "Extracting type mismatch")
+       (extract ty)
+       (extract ty2)
+       (panic "Substitution type mismatch! Argument type must match type of substituted term"))"#,
+            r#"((panic "Substitution type mismatch! Argument type must match type of substituted term"))"#,
+        )
 }
 
 /// Adds an egglog program to `res` that adds the given term
@@ -959,8 +983,9 @@ pub fn optimize(
                     &built.initialization,
                     &built.schedule,
                     eggcc_config.ablate.as_deref(),
-                )?;
-                let serialized = serialized_egraph(egraph);
+                )
+                .unwrap_or_else(|err| panic!("native eggplant feature runner failed: {err}"));
+                let serialized = greedy_dag_extractor::serialized_egraph_native(egraph);
                 (serialized.0, serialized.1, serialization_start.elapsed())
             };
 
@@ -1049,13 +1074,13 @@ pub(crate) fn run_egglog_program_with_native_rules(
     initialization: &str,
     schedule: &str,
     ablate: Option<&str>,
-) -> std::result::Result<egglog::EGraph, egglog::Error> {
+) -> std::result::Result<eggplant::egglog::EGraph, eggplant::egglog::Error> {
     use eggplant::prelude::RxSgl;
 
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
     {
         let mut guard = egraph.lock().unwrap();
-        *guard = egglog::EGraph::default();
+        *guard = eggplant::egglog::EGraph::default();
         guard.parse_and_run_program(None, prologue)?;
         guard.parse_and_run_program(None, initialization)?;
     }
