@@ -267,22 +267,21 @@ mod native_tests {
         let initialization = format!("(let {binding} {expr})");
         use eggplant::egglog::ast::Expr as NativeEgglogExpr;
 
-        let mut egraph = crate::run_egglog_program_with_native_rules(
+        crate::with_native_rules_egraph(
             prologue,
             &initialization,
             schedule,
             ablate,
+            |egraph| {
+                let (sort, value) = egraph.eval_expr(&NativeEgglogExpr::Var(
+                    eggplant::egglog::ast::Span::Panic,
+                    binding.into(),
+                ))?;
+                let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
+                Ok(termdag.to_string(&extracted))
+            },
         )
-        .unwrap();
-
-        let (sort, value) = egraph
-            .eval_expr(&NativeEgglogExpr::Var(
-                eggplant::egglog::ast::Span::Panic,
-                binding.into(),
-            ))
-            .unwrap();
-        let (termdag, extracted, _) = egraph.extract_value(&sort, value).unwrap();
-        termdag.to_string(&extracted)
+        .unwrap()
     }
 
     fn peephole_feature_schedule() -> String {

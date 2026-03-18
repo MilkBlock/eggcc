@@ -11,5 +11,5 @@ fn native_test_mutex() -> &'static Mutex<()> {
 pub(crate) fn lock() -> MutexGuard<'static, ()> {
     native_test_mutex()
         .lock()
-        .expect("native eggplant test mutex should not be poisoned")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }

@@ -338,7 +338,7 @@ pub fn serialized_egraph(
 
 #[cfg(feature = "eggplant")]
 pub fn serialized_egraph_native(
-    egglog_egraph: eggplant::egglog::EGraph,
+    egglog_egraph: &eggplant::egglog::EGraph,
 ) -> (egraph_serialize::EGraph, IndexSet<String>) {
     let config = eggplant::egglog::SerializeConfig::default();
     let native = egglog_egraph.serialize(config).egraph;

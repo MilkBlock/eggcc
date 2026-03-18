@@ -978,14 +978,14 @@ pub fn optimize(
                     eggcc_config.ablate.as_deref(),
                 );
                 let serialization_start = Instant::now();
-                let egraph = run_egglog_program_with_native_rules(
+                let serialized = with_native_rules_egraph(
                     &native_prologue,
                     &built.initialization,
                     &built.schedule,
                     eggcc_config.ablate.as_deref(),
+                    |egraph| Ok(greedy_dag_extractor::serialized_egraph_native(egraph)),
                 )
                 .unwrap_or_else(|err| panic!("native eggplant feature runner failed: {err}"));
-                let serialized = greedy_dag_extractor::serialized_egraph_native(egraph);
                 (serialized.0, serialized.1, serialization_start.elapsed())
             };
 
@@ -1069,12 +1069,16 @@ pub fn optimize(
 }
 
 #[cfg(feature = "eggplant")]
-pub(crate) fn run_egglog_program_with_native_rules(
+pub(crate) fn with_native_rules_egraph<T, F>(
     prologue: &str,
     initialization: &str,
     schedule: &str,
     ablate: Option<&str>,
-) -> std::result::Result<eggplant::egglog::EGraph, eggplant::egglog::Error> {
+    run: F,
+) -> std::result::Result<T, eggplant::egglog::Error>
+where
+    F: FnOnce(&mut eggplant::egglog::EGraph) -> std::result::Result<T, eggplant::egglog::Error>,
+{
     use eggplant::prelude::RxSgl;
 
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
@@ -1089,7 +1093,7 @@ pub(crate) fn run_egglog_program_with_native_rules(
 
     let mut guard = egraph.lock().unwrap();
     guard.parse_and_run_program(None, schedule)?;
-    Ok(std::mem::take(&mut *guard))
+    run(&mut guard)
 }
 
 fn check_program_gets_type(program: TreeProgram) -> Result {
