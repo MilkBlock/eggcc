@@ -127,9 +127,11 @@ fn native_execution_prologue() -> String {
 #[cfg(feature = "eggplant")]
 fn feature_execution_prologue(use_context: bool, ablate: Option<&str>) -> String {
     let base = match ablate {
-        Some("peepholes") | Some("switch_rewrite") | Some("select_opt") | None => {
-            native_execution_prologue()
-        }
+        Some("peepholes")
+        | Some("switch_rewrite")
+        | Some("always-switch-rewrite")
+        | Some("select_opt")
+        | None => native_execution_prologue(),
         Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
     };
     if use_context {
@@ -1093,17 +1095,17 @@ where
     let _run_guard = NATIVE_RUN_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap();
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
     {
-        let mut guard = egraph.lock().unwrap();
+        let mut guard = egraph.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = eggplant::egglog::EGraph::default();
         guard.parse_and_run_program(None, prologue)?;
         guard.parse_and_run_program(None, initialization)?;
     }
     eggplant_backend::register_native_rules(ablate);
-    let mut guard = egraph.lock().unwrap();
+    let mut guard = egraph.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.parse_and_run_program(None, schedule)?;
     run(&mut guard)
 }
