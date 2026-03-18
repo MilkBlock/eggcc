@@ -165,7 +165,9 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
+    // Required by the `#[eggplant::dsl]` expansion below.
     use eggplant::dashmap;
+    // Required by the `#[eggplant::dsl]` expansion below.
     use eggplant::egglog;
     use super::super::native_rule_helpers::{
         bool_expr, call_expr, i64_expr, insert_call, node_expr, var_expr, EqCallConstraint,
@@ -175,6 +177,8 @@ pub(crate) mod native {
     use crate::eggplant_backend::peepholes::native::{PeepholePatRec, PeepholeTx};
     use eggplant::prelude::{Insertable, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
+    // The DSL macro generates the `IntB` query type used below.
+    #[allow(dead_code)]
     #[eggplant::dsl]
     enum Bound {
         IntB { value: i64 },

@@ -342,9 +342,9 @@ pub fn serialized_egraph_native(
 ) -> (egraph_serialize::EGraph, IndexSet<String>) {
     let config = eggplant::egglog::SerializeConfig::default();
     let native = egglog_egraph.serialize(config).egraph;
-    let json = serde_json::to_string(&native)
-        .expect("eggplant-native serialized egraph should serialize to JSON");
-    let egraph = serde_json::from_str(&json)
+    let json = serde_json::to_value(native)
+        .expect("eggplant-native serialized egraph should serialize to JSON value");
+    let egraph = serde_json::from_value(json)
         .expect("eggplant-native serialized egraph should match local egraph_serialize schema");
 
     // The native feature path currently uses the serialized graph for extraction.

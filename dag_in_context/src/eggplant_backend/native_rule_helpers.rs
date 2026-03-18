@@ -7,8 +7,7 @@ use eggplant::egglog::{
 use eggplant::prelude::{RustSpan, Span};
 #[cfg(feature = "eggplant")]
 use eggplant::wrap::{
-    constraint::{HandleToConstrain, HandleTy, IntoConstraintFact},
-    EgglogNode, EgglogTy, Insertable, RuleCtx, Value,
+    constraint::IntoConstraintFact, EgglogNode, EgglogTy, Insertable, RuleCtx, Value,
 };
 
 #[cfg(feature = "eggplant")]
@@ -29,15 +28,6 @@ pub(crate) fn bool_expr(value: bool) -> EgglogExpr {
 #[cfg(feature = "eggplant")]
 pub(crate) fn i64_expr(value: i64) -> EgglogExpr {
     EgglogExpr::Lit(span!(), Literal::Int(value))
-}
-
-#[cfg(feature = "eggplant")]
-pub(crate) fn handle_expr<T: EgglogTy>(handle: &HandleToConstrain<T>) -> EgglogExpr {
-    match &handle.handle {
-        HandleTy::Base { field_name, sym } => EgglogExpr::Var(span!(), format!("{sym}{field_name}")),
-        HandleTy::Complex { sym } => EgglogExpr::Var(span!(), format!("{sym}")),
-        HandleTy::Literal { lit } => EgglogExpr::Lit(span!(), lit.clone()),
-    }
 }
 
 #[cfg(feature = "eggplant")]
