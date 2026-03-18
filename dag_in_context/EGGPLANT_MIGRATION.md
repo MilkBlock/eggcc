@@ -7,7 +7,8 @@
 - 默认（不启用 feature）：走旧后端（`include_str!` 拼接 `.egg`）
   - 入口：`dag_in_context::prologue_egglog_text()`
 - 启用 `eggplant` feature：走新后端（`src/eggplant_backend/`）
-  - 入口：`dag_in_context::prologue()` → `eggplant_backend::prologue()`
+  - 文本兼容入口：`dag_in_context::prologue()` → `eggplant_backend::prologue()`
+  - feature 优化执行路径中的原生规则入口：`dag_in_context::optimize()` → `run_egglog_program_with_native_rules(...)` + `eggplant_backend::native_execution_prologue()`
 
 本地常用命令：
 
@@ -26,6 +27,9 @@ cd dag_in_context && cargo test --features eggplant
 - `src/eggplant_backend/mod.rs`
   - 聚合器：`eggplant_backend::prologue() -> String`
   - 负责按顺序拼接各文件的 `fragment()`（或暂时继续 `include_str!` 未迁移的文件）
+  - `native_execution_prologue() -> String`
+    - 仅用于 `--features eggplant` 的原生执行路径
+    - 当前会省略那些已经由 typed rule registration 接管的文本 fragment
 - 每个被迁移的 `.egg` 文件对应一个 Rust 模块：
   - 例：`src/schema.egg` → `src/eggplant_backend/schema.rs`
   - 模块必须提供：`pub(crate) fn fragment() -> String`
@@ -141,7 +145,6 @@ MyTx::add_rule(
   - `src/eggplant_backend/interval_analysis.rs`
   - `src/eggplant_backend/switch_rewrites.rs`
   - `src/eggplant_backend/select.rs`
-  - `src/eggplant_backend/peepholes.rs`
   - `src/eggplant_backend/memory.rs`
   - `src/eggplant_backend/mem_simple.rs`
   - `src/eggplant_backend/loop_invariant.rs`
@@ -162,7 +165,12 @@ MyTx::add_rule(
 
 说明：
 
-- `src/eggplant_backend/peepholes.rs` 现在包含一个基于真实 `schema_dsl` 的 feature-gated typed-rule prototype，以及与当前 text backend 对齐的固定输入测试；但当前生产 backend 仍通过 `fragment()` 文本接入，因此它暂时继续归类为 `text-wrapped`，直到主运行路径切换为 typed execution。
+- `src/eggplant_backend/peepholes.rs` 现在是混合状态：
+  - 在 `eggplant_backend::prologue()` 文本兼容路径中，它仍提供 `fragment()`，因此文件本身仍保留 text-wrapped 内容。
+  - 在 `--features eggplant` 的 `optimize()` 执行路径中，它已经通过 `run_egglog_program_with_native_rules(...)` + typed registration 作为 feature-path native module 运行。
+- 因此对运行路径的分类应理解为：
+  - 默认 backend / 文本兼容 prologue：`peepholes` 仍是 text-backed
+  - `--features eggplant` 优化执行路径：`peepholes` 已经是 native-owned
 
 ## 迁移完成后的后端决策
 

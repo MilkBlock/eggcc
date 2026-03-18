@@ -918,6 +918,14 @@ mod tests {
     }
 
     #[test]
+    fn schema_fragment_parses_as_egglog_program() {
+        let mut egraph = egglog::EGraph::default();
+        egraph
+            .parse_and_run_program(None, &super::schema::fragment())
+            .unwrap();
+    }
+
+    #[test]
     fn injected_expr_section_contains_migrated_constructors() {
         const EXPR_DECL_HEADER: &str = "; Every term is an `Expr` or a `ListExpr`.\n";
         const LIST_EXPR_HEADER: &str = r#"; Used for constructing a list of branches for `Switch`es

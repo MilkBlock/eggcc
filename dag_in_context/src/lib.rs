@@ -122,6 +122,19 @@ fn native_execution_prologue() -> String {
     eggplant_backend::native_execution_prologue()
 }
 
+#[cfg(feature = "eggplant")]
+fn feature_execution_prologue(use_context: bool, ablate: Option<&str>) -> String {
+    let base = match ablate {
+        Some("peepholes") | None => native_execution_prologue(),
+        Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
+    };
+    if use_context {
+        base
+    } else {
+        remove_new_contexts(&base)
+    }
+}
+
 fn ablate_prologue(prologue: &str, ablate: &str) -> String {
     let mut found_ruleset = false;
     let lines: Vec<String> = prologue
@@ -936,10 +949,10 @@ pub fn optimize(
                     eggcc_config.ablate.as_deref(),
                     eggcc_config.use_context,
                 );
-                let native_prologue = match eggcc_config.ablate.as_deref() {
-                    Some("peepholes") | None => native_execution_prologue(),
-                    Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
-                };
+                let native_prologue = feature_execution_prologue(
+                    eggcc_config.use_context,
+                    eggcc_config.ablate.as_deref(),
+                );
                 let serialization_start = Instant::now();
                 let egraph = run_egglog_program_with_native_rules(
                     &native_prologue,
@@ -1037,18 +1050,21 @@ pub(crate) fn run_egglog_program_with_native_rules(
     schedule: &str,
     ablate: Option<&str>,
 ) -> std::result::Result<egglog::EGraph, egglog::Error> {
-    use eggplant::wrap::NonPatRecSgl;
+    use eggplant::prelude::RxSgl;
 
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
-    let mut guard = egraph.lock().unwrap();
-    *guard = egglog::EGraph::default();
-    guard.parse_and_run_program(None, prologue)?;
-    guard.parse_and_run_program(None, initialization)?;
+    {
+        let mut guard = egraph.lock().unwrap();
+        *guard = egglog::EGraph::default();
+        guard.parse_and_run_program(None, prologue)?;
+        guard.parse_and_run_program(None, initialization)?;
+    }
+
     eggplant_backend::register_native_rules(ablate);
+
+    let mut guard = egraph.lock().unwrap();
     guard.parse_and_run_program(None, schedule)?;
-    let egraph = std::mem::take(&mut *guard);
-    drop(guard);
-    Ok(egraph)
+    Ok(std::mem::take(&mut *guard))
 }
 
 fn check_program_gets_type(program: TreeProgram) -> Result {

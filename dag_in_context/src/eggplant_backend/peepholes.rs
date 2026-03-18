@@ -371,13 +371,13 @@ mod native_tests {
         );
 
         let simplified = eval_and_extract_native_feature_expr(
-            &crate::native_execution_prologue(),
+            &crate::feature_execution_prologue(true, None),
             &expr.to_string(),
             &schedule,
             None,
         );
         let ablated = eval_and_extract_native_feature_expr(
-            &crate::native_execution_prologue(),
+            &crate::feature_execution_prologue(true, Some("peepholes")),
             &expr.to_string(),
             &crate::ablate_schedule(&schedule, "peepholes"),
             Some("peepholes"),
@@ -419,12 +419,25 @@ mod native_tests {
         let text_extracted =
             eval_and_extract_expr(&crate::prologue_egglog_text(), &expr.to_string(), &schedule);
         let native_extracted = eval_and_extract_native_feature_expr(
-            &crate::native_execution_prologue(),
+            &crate::feature_execution_prologue(true, None),
             &expr.to_string(),
             &schedule,
             None,
         );
 
         assert_eq!(native_extracted, text_extracted);
+    }
+
+    #[test]
+    fn native_feature_runner_smoke_executes_without_deadlocking() {
+        let schedule = format!("(run-schedule\n{}\n)", crate::schedule::helpers());
+        let extracted = eval_and_extract_native_feature_expr(
+            &crate::feature_execution_prologue(true, None),
+            "(Const (Int 7) (Base (IntT)) (InFunc \"RLCR\"))",
+            &schedule,
+            None,
+        );
+
+        assert_eq!(extracted, "(Const (Int 7) (Base (IntT)) (InFunc \"RLCR\"))");
     }
 }
