@@ -10,6 +10,8 @@ use interpreter::Value;
 use schedule::{rulesets, CompilerPass};
 use schema::{Expr, RcExpr, TreeProgram};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "eggplant")]
+use std::sync::{Mutex, OnceLock};
 use std::{
     collections::HashSet,
     ffi::OsString,
@@ -954,16 +956,6 @@ pub fn optimize(
         for batch in batches {
             log::info!("Running pass {} on batch {:?}", i, batch);
             log::info!("Schedule: {:?}", schedule);
-            // only inline functions on the first pass
-            let egglog_prog = build_program(
-                &res,
-                inline_program.as_ref(),
-                &batch,
-                schedule.egglog_schedule(),
-                eggcc_config.ablate.as_deref(),
-                eggcc_config.use_context,
-            );
-
             log::info!("Running egglog program...");
             #[cfg(feature = "eggplant")]
             let (serialized, unextractables, serialization_duration) = {
@@ -987,12 +979,26 @@ pub fn optimize(
                     eggcc_config.ablate.as_deref(),
                     |egraph| Ok(greedy_dag_extractor::serialized_egraph_native(egraph)),
                 )
-                .unwrap_or_else(|err| panic!("native eggplant feature runner failed: {err}"));
+                .map_err(|err| {
+                    egglog::Error::ParseError(egglog::ast::ParseError(
+                        egglog::ast::Span::Panic,
+                        format!("native eggplant feature runner failed: {err}"),
+                    ))
+                })?;
                 (serialized.0, serialized.1, serialization_start.elapsed())
             };
 
             #[cfg(not(feature = "eggplant"))]
             let (serialized, unextractables, serialization_duration) = {
+                // only inline functions on the first pass
+                let egglog_prog = build_program(
+                    &res,
+                    inline_program.as_ref(),
+                    &batch,
+                    schedule.egglog_schedule(),
+                    eggcc_config.ablate.as_deref(),
+                    eggcc_config.use_context,
+                );
                 let mut egraph = egglog::EGraph::default();
                 egraph.parse_and_run_program(None, &egglog_prog)?;
                 let serialization_start = Instant::now();
@@ -1083,6 +1089,12 @@ where
 {
     use eggplant::prelude::RxSgl;
 
+    static NATIVE_RUN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _run_guard = NATIVE_RUN_LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap();
+
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
     {
         let mut guard = egraph.lock().unwrap();
@@ -1090,9 +1102,7 @@ where
         guard.parse_and_run_program(None, prologue)?;
         guard.parse_and_run_program(None, initialization)?;
     }
-
     eggplant_backend::register_native_rules(ablate);
-
     let mut guard = egraph.lock().unwrap();
     guard.parse_and_run_program(None, schedule)?;
     run(&mut guard)
