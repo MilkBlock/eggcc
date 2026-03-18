@@ -8,7 +8,7 @@
   - 入口：`dag_in_context::prologue_egglog_text()`
 - 启用 `eggplant` feature：走新后端（`src/eggplant_backend/`）
   - 文本兼容入口：`dag_in_context::prologue()` → `eggplant_backend::prologue()`
-  - feature 优化执行路径中的原生规则入口：`dag_in_context::optimize()` → `run_egglog_program_with_native_rules(...)` + `eggplant_backend::native_execution_prologue()`
+  - feature 优化执行路径中的原生规则入口：`dag_in_context::optimize()` → `with_native_rules_egraph(...)` + `eggplant_backend::native_execution_prologue()`
 
 本地常用命令：
 
@@ -165,12 +165,12 @@ MyTx::add_rule(
 
 说明：
 
-- `src/eggplant_backend/peepholes.rs` 现在是混合状态：
-  - 在 `eggplant_backend::prologue()` 文本兼容路径中，它仍提供 `fragment()`，因此文件本身仍保留 text-wrapped 内容。
-  - 在 `--features eggplant` 的 `optimize()` 执行路径中，它已经通过 `run_egglog_program_with_native_rules(...)` + typed registration 作为 feature-path native module 运行。
+- `src/eggplant_backend/peepholes.rs`、`src/eggplant_backend/switch_rewrites.rs`、`src/eggplant_backend/select.rs` 现在都是混合状态：
+  - 在 `eggplant_backend::prologue()` 文本兼容路径中，它们仍提供 `fragment()`，因此文件本身仍保留 text-wrapped 内容。
+  - 在 `--features eggplant` 的 `optimize()` 执行路径中，它们已经通过 `with_native_rules_egraph(...)` + typed registration 作为 feature-path native module 运行。
 - 因此对运行路径的分类应理解为：
-  - 默认 backend / 文本兼容 prologue：`peepholes` 仍是 text-backed
-  - `--features eggplant` 优化执行路径：`peepholes` 已经是 native-owned
+  - 默认 backend / 文本兼容 prologue：`peepholes` / `switch_rewrites` / `select` 仍是 text-backed
+  - `--features eggplant` 优化执行路径：`peepholes` / `switch_rewrites` / `select` 已经是 native-owned
 
 ## 迁移完成后的后端决策
 

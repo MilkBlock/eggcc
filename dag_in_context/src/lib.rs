@@ -125,7 +125,9 @@ fn native_execution_prologue() -> String {
 #[cfg(feature = "eggplant")]
 fn feature_execution_prologue(use_context: bool, ablate: Option<&str>) -> String {
     let base = match ablate {
-        Some("peepholes") | None => native_execution_prologue(),
+        Some("peepholes") | Some("switch_rewrite") | Some("select_opt") | None => {
+            native_execution_prologue()
+        }
         Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
     };
     if use_context {

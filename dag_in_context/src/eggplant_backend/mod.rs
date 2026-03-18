@@ -16,6 +16,7 @@ mod loop_strength_reduction;
 mod loop_unroll;
 mod mem_simple;
 mod memory;
+mod native_rule_helpers;
 mod non_weakly_linear;
 mod passthrough;
 pub(crate) mod peepholes;
@@ -103,8 +104,6 @@ pub(crate) fn native_execution_prologue() -> String {
         expr_size::fragment(),
         drop_at::fragment(),
         interval_analysis::fragment(),
-        switch_rewrites::fragment(),
-        select::fragment(),
         mem_simple::fragment(),
         loop_invariant::rules(),
         loop_simplify::fragment(),
@@ -127,6 +126,12 @@ pub(crate) fn native_execution_prologue() -> String {
 pub(crate) fn register_native_rules(ablate: Option<&str>) {
     if ablate != Some("peepholes") {
         let _ = peepholes::native::register_native_rules("peepholes");
+    }
+    if ablate != Some("switch_rewrite") {
+        let _ = switch_rewrites::native::register_native_rules();
+    }
+    if ablate != Some("select_opt") {
+        let _ = select::native::register_native_rules();
     }
 }
 
