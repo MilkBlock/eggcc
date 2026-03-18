@@ -29,6 +29,8 @@ mod swap_if;
 mod switch_rewrites;
 mod term_subst;
 mod terms;
+#[cfg(all(test, feature = "eggplant"))]
+mod test_lock;
 mod type_analysis;
 mod util;
 

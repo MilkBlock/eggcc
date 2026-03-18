@@ -207,6 +207,7 @@ mod native_tests {
     use super::native::{register_native_rules, PeepholeTx};
     use crate::ast;
     use crate::eggplant_backend::schema_dsl;
+    use crate::eggplant_backend::test_lock;
     use egglog::{ast::Expr as EgglogExpr, EGraph, TermDag};
     use eggplant::prelude::{Commit, RuleRunnerSgl, RunConfig, TxSgl};
 
@@ -263,6 +264,7 @@ mod native_tests {
 
     #[test]
     fn native_peepholes_align_with_text_backend_arith_case() {
+        let _guard = test_lock::lock();
         let ruleset = register_native_rules("native_peepholes_round1_arith");
 
         let x_tuple_ty = ast::tuplet_vec(vec![ast::intt(), ast::intt(), ast::statet()]);
@@ -336,6 +338,7 @@ mod native_tests {
 
     #[test]
     fn native_peepholes_run_without_text_prologue() {
+        let _guard = test_lock::lock();
         let ruleset = register_native_rules("native_peepholes_round1_select");
 
         let select_expr: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Top::new(
@@ -359,6 +362,7 @@ mod native_tests {
 
     #[test]
     fn feature_path_uses_native_peepholes_when_text_rules_are_absent() {
+        let _guard = test_lock::lock();
         let x_tuple_ty = ast::tuplet_vec(vec![ast::intt(), ast::intt(), ast::statet()]);
         let expr = ast::add(
             ast::int_ty(0, x_tuple_ty.clone()),
@@ -397,6 +401,7 @@ mod native_tests {
 
     #[test]
     fn native_feature_path_matches_text_backend_for_fixed_input() {
+        let _guard = test_lock::lock();
         let x_tuple_ty = ast::tuplet_vec(vec![ast::intt(), ast::intt(), ast::statet()]);
         let zero = ast::int_ty(0, x_tuple_ty.clone());
         let one = ast::int_ty(1, x_tuple_ty.clone());
@@ -430,6 +435,7 @@ mod native_tests {
 
     #[test]
     fn native_feature_runner_smoke_executes_without_deadlocking() {
+        let _guard = test_lock::lock();
         let schedule = format!("(run-schedule\n{}\n)", crate::schedule::helpers());
         let extracted = eval_and_extract_native_feature_expr(
             &crate::feature_execution_prologue(true, None),
