@@ -124,6 +124,7 @@ pub(crate) fn native_execution_prologue() -> String {
 
 #[cfg(feature = "eggplant")]
 pub(crate) fn register_native_rules(ablate: Option<&str>) {
+    let _ = switch_rewrites::native::ensure_always_native_ruleset();
     if ablate != Some("peepholes") {
         let _ = peepholes::native::register_native_rules("peepholes");
     }

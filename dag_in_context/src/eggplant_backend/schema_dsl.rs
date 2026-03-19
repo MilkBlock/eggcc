@@ -258,18 +258,22 @@ pub(crate) fn expr_section() -> String {
     ])
 }
 
+#[allow(dead_code)]
 pub(crate) fn types_section() -> String {
     datatypes_section(&["BaseType", "TypeList", "Type"])
 }
 
+#[allow(dead_code)]
 pub(crate) fn assumptions_section() -> String {
     datatypes_section(&["Assumption"])
 }
 
+#[allow(dead_code)]
 pub(crate) fn constants_section() -> String {
     datatypes_section(&["Constant"])
 }
 
+#[allow(dead_code)]
 pub(crate) fn operators_section() -> String {
     datatypes_section(&["TernaryOp", "BinaryOp", "UnaryOp"])
 }

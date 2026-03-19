@@ -185,9 +185,12 @@ pub(crate) mod native {
         UnknownB {},
     }
 
+    pub(crate) fn ensure_always_native_ruleset() -> RuleSetId {
+        PeepholeTx::new_ruleset("always-switch-rewrite")
+    }
+
     pub(crate) fn register_native_rules() -> RuleSetId {
         let ruleset = PeepholeTx::new_ruleset("switch_rewrite");
-        let _always_ruleset = PeepholeTx::new_ruleset("always-switch-rewrite");
 
         PeepholeTx::add_rule(
             "switch_min",
@@ -1132,5 +1135,23 @@ mod native_tests {
         );
 
         assert_ne!(ablated, simplified);
+    }
+
+    #[test]
+    fn ablating_switch_rewrite_still_allows_default_feature_schedule() {
+        let _guard = test_lock::lock();
+
+        let expr = "(Const (Int 7) (Base (IntT)) (InFunc \"RLCR\"))";
+        let schedule = format!(
+            "(run-schedule\n{}\n(saturate always-switch-rewrite)\n)",
+            crate::schedule::types_and_indexing()
+        );
+
+        let _ = eval_and_extract_native_expr(
+            &crate::feature_execution_prologue(true, Some("switch_rewrite")),
+            expr,
+            &schedule,
+            Some("switch_rewrite"),
+        );
     }
 }
