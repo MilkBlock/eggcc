@@ -979,7 +979,14 @@ pub fn optimize(
                     &built.initialization,
                     &built.schedule,
                     eggcc_config.ablate.as_deref(),
-                    |egraph| Ok(greedy_dag_extractor::serialized_egraph_native(egraph)),
+                    |egraph| {
+                        greedy_dag_extractor::serialized_egraph_native(egraph).map_err(|err| {
+                            eggplant::egglog::Error::ParseError(eggplant::egglog::ast::ParseError(
+                                eggplant::egglog::ast::Span::Panic,
+                                err,
+                            ))
+                        })
+                    },
                 )
                 .map_err(|err| {
                     egglog::Error::ParseError(egglog::ast::ParseError(
