@@ -196,7 +196,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
     use eggplant::wrap::{PRRuleCtx, PatVars};
 
@@ -227,20 +227,20 @@ pub(crate) mod native {
         let body_ty = schema_dsl::Type::query_leaf();
 
         let same_name = function.handle_name().eq(&recursive_call.handle_name());
-        let always_runs_has_type = prim_fact(
-            "HasType",
-            vec![
+        let always_runs_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 always_runs.handle().into_handle_ty(),
                 start_ty.handle().into_handle_ty(),
             ],
-        );
-        let body_has_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let body_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 body_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         RecToLoopPat::new(
             function,
@@ -343,27 +343,27 @@ pub(crate) mod native {
         let call0_is_first = call0.handle_index().eq(&(&0_i64).as_handle());
         let call1_is_second = call1.handle_index().eq(&(&1_i64).as_handle());
         let same_name = function.handle_name().eq(&recursive_call.handle_name());
-        let always_runs_has_type = prim_fact(
-            "HasType",
-            vec![
+        let always_runs_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 always_runs.handle().into_handle_ty(),
                 start_ty.handle().into_handle_ty(),
             ],
-        );
-        let body_has_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let body_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 body_ty.handle().into_handle_ty(),
             ],
-        );
-        let body_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let body_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 body_ctx.handle().into_handle_ty(),
             ],
-        );
+        };
 
         RecToLoopAccumPat::new(
             function,

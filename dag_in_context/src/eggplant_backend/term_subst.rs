@@ -106,7 +106,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        prim_call, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     fn expr_leaf<PR: PatRecSgl>() -> schema_dsl::Expr<PR> {
@@ -282,10 +282,10 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
 
         TermSubstTypePat::new(lhs, ty)
             .assert(lhs_is_term_subst)
@@ -323,10 +323,10 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
 
         TermSubstConstPat::new(lhs, ctx, expr, constant, ty)
             .assert(lhs_is_term_subst)
@@ -346,10 +346,10 @@ pub(crate) mod native {
                 prim_call::<schema_dsl::Term>("TermEmpty", vec![]).into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
 
         TermSubstEmptyPat::new(lhs, ctx, expr, ty)
             .assert(lhs_is_term_subst)

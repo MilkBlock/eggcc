@@ -289,9 +289,7 @@ pub(crate) mod native {
     use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl::{self, ExprRuleCtx};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{
-        prim_call, prim_fact, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
-    };
+    use eggplant::prelude::{prim_call, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     fn expr_leaf<PR: PatRecSgl>() -> schema_dsl::Expr<PR> {
         schema_dsl::Expr::query_leaf()
@@ -358,14 +356,14 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![to.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![to.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![to.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![to.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
+        };
 
         IfSubstPat::new(lhs, to, input, ty, ctx)
             .assert(lhs_is_if_subst)
@@ -393,13 +391,13 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 to.handle().into_handle_ty(),
                 new_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         SubstConstPat::new(lhs, assum, to, input, constant, new_ty)
             .assert(input_is_const)
@@ -450,13 +448,13 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 to.handle().into_handle_ty(),
                 new_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         SubstEmptyPat::new(lhs, assum, to, input, new_ty)
             .assert(input_is_empty)

@@ -130,7 +130,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     fn type_leaf<PR: PatRecSgl>() -> schema_dsl::Type<PR> {
@@ -180,14 +180,17 @@ pub(crate) mod native {
             .eq(&(lhs.handle_index() + (&1_i64).as_handle()));
         let arg_index_matches = arg_out.handle_index().eq(&lhs.handle_index());
         let same_body_value = body_out.handle().eq(&arg_out.handle());
-        let has_type = prim_fact(
-            "HasType",
-            vec![
+        let has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 lhs.handle().into_handle_ty(),
                 lhs_ty.handle().into_handle_ty(),
             ],
-        );
-        let pure_type = prim_fact("PureType", vec![lhs_ty.handle().into_handle_ty()]);
+        };
+        let pure_type = eggplant::wrap::FactCallConstraint {
+            op: "PureType",
+            operands: vec![lhs_ty.handle().into_handle_ty()],
+        };
 
         LoopThetaPat::new(inputs, lhs)
             .assert(body_index_matches)
@@ -229,13 +232,13 @@ pub(crate) mod native {
         let same_arg_index = arg0_out.handle_index().eq(&arg1_out.handle_index());
         let same_branch0_value = branch0_out.handle().eq(&arg0_out.handle());
         let same_branch1_value = branch1_out.handle().eq(&arg1_out.handle());
-        let has_type = prim_fact(
-            "HasType",
-            vec![
+        let has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 lhs.handle().into_handle_ty(),
                 lhs_ty.handle().into_handle_ty(),
             ],
-        );
+        };
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
         SwitchArgPat::new(inputs, arg0_out, lhs)
@@ -311,13 +314,13 @@ pub(crate) mod native {
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_type = prim_fact(
-            "HasType",
-            vec![
+        let has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 then_branch.handle().into_handle_ty(),
                 lhs_ty.handle().into_handle_ty(),
             ],
-        );
+        };
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
         IfArgPat::new(inputs, then_arg_out, lhs)
@@ -362,13 +365,13 @@ pub(crate) mod native {
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_state_type = prim_fact(
-            "HasType",
-            vec![
+        let has_state_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 then_branch.handle().into_handle_ty(),
                 state_type::<PR>().handle().into_handle_ty(),
             ],
-        );
+        };
 
         IfStateEdgePat::new(pred, inputs, then_, else_, outputs, then_arg_out, lhs)
             .assert(same_then_index)

@@ -171,8 +171,7 @@ pub(crate) mod native {
     use crate::eggplant_backend::interval_bounds::{hi_bound, lo_bound, IntB};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
-        RuleSetId,
+        prim_call, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     pub(crate) fn ensure_always_native_ruleset() -> RuleSetId {
@@ -396,17 +395,17 @@ pub(crate) mod native {
         let thn_out = schema_dsl::Get::query(&thn);
         let els_out = schema_dsl::Get::query(&els);
 
-        let ctx_of_if = prim_fact(
-            "ContextOf",
-            vec![
+        let ctx_of_if = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 ctx.handle().into_handle_ty(),
             ],
-        );
-        let has_arg_ty = prim_fact(
-            "HasArgType",
-            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        };
+        let has_arg_ty = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let thn_const_matches = thn_const.handle().eq(&thn_out.handle());
         let els_const_matches = els_const.handle().eq(&els_out.handle());
@@ -470,17 +469,17 @@ pub(crate) mod native {
         let if_out_get = schema_dsl::Get::query(&if_e);
         let a_get = schema_dsl::Get::query(&inputs);
         let thn_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &thn_ctx));
-        let ctx_of_if = prim_fact(
-            "ContextOf",
-            vec![
+        let ctx_of_if = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 ctx.handle().into_handle_ty(),
             ],
-        );
-        let has_arg_ty = prim_fact(
-            "HasArgType",
-            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        };
+        let has_arg_ty = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let a_matches = a.handle().eq(&a_get.handle());
         let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
@@ -541,17 +540,17 @@ pub(crate) mod native {
         let if_out_get = schema_dsl::Get::query(&if_e);
         let b_get = schema_dsl::Get::query(&inputs);
         let els_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &els_ctx));
-        let ctx_of_if = prim_fact(
-            "ContextOf",
-            vec![
+        let ctx_of_if = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 ctx.handle().into_handle_ty(),
             ],
-        );
-        let has_arg_ty = prim_fact(
-            "HasArgType",
-            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
+        };
+        let has_arg_ty = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let b_matches = b.handle().eq(&b_get.handle());
         let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
@@ -609,23 +608,24 @@ pub(crate) mod native {
         let ins_ty = schema_dsl::TypeList::query_leaf();
         let switch_and_len = BaseVar::<i64, PR>::query_named("switch_and_len");
 
-        let ins_has_type = prim_fact(
-            "HasType",
-            vec![
+        let ins_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 ins.handle().into_handle_ty(),
                 schema_dsl::TupleT::query(&ins_ty).handle().into_handle_ty(),
             ],
-        );
-        let tuple_len_known = switch_and_len
-            .handle()
-            .eq(&prim_call::<i64>("tuple-length", vec![ins.handle().into_handle_ty()]));
-        let rhs_small = prim_fact(
-            "<",
-            vec![
+        };
+        let tuple_len_known = switch_and_len.handle().eq(&prim_call::<i64>(
+            "tuple-length",
+            vec![ins.handle().into_handle_ty()],
+        ));
+        let rhs_small = eggplant::wrap::FactCallConstraint {
+            op: "<",
+            operands: vec![
                 prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
                 (&100_i64).into_handle_ty(),
             ],
-        );
+        };
 
         SwitchAndPat::new(lhs, a, b, ins, x, y, ins_ty)
             .assert(ins_has_type)
@@ -659,30 +659,31 @@ pub(crate) mod native {
         let ins_ty = schema_dsl::TypeList::query_leaf();
         let switch_or_len = BaseVar::<i64, PR>::query_named("switch_or_len");
 
-        let ins_has_type = prim_fact(
-            "HasType",
-            vec![
+        let ins_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 ins.handle().into_handle_ty(),
                 schema_dsl::TupleT::query(&ins_ty).handle().into_handle_ty(),
             ],
-        );
-        let tuple_len_known = switch_or_len
-            .handle()
-            .eq(&prim_call::<i64>("tuple-length", vec![ins.handle().into_handle_ty()]));
-        let lhs_small = prim_fact(
-            "<",
-            vec![
+        };
+        let tuple_len_known = switch_or_len.handle().eq(&prim_call::<i64>(
+            "tuple-length",
+            vec![ins.handle().into_handle_ty()],
+        ));
+        let lhs_small = eggplant::wrap::FactCallConstraint {
+            op: "<",
+            operands: vec![
                 prim_call::<i64>("Expr-size", vec![x.handle().into_handle_ty()]).into_handle_ty(),
                 (&100_i64).into_handle_ty(),
             ],
-        );
-        let rhs_small = prim_fact(
-            "<",
-            vec![
+        };
+        let rhs_small = eggplant::wrap::FactCallConstraint {
+            op: "<",
+            operands: vec![
                 prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
                 (&100_i64).into_handle_ty(),
             ],
-        );
+        };
 
         SwitchOrPat::new(lhs, a, b, ins, x, y, ins_ty)
             .assert(ins_has_type)

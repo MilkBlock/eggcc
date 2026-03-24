@@ -159,7 +159,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -183,27 +183,27 @@ pub(crate) mod native {
         let constant = schema_dsl::Const::query(&c, &out_type, &loop_output_ctx);
         let in_type = schema_dsl::Type::query_leaf();
 
-        let inputs_context = prim_fact(
-            "ContextOf",
-            vec![
+        let inputs_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 inputs.handle().into_handle_ty(),
                 loop_input_ctx.handle().into_handle_ty(),
             ],
-        );
-        let body_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let body_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 pred_and_body.handle().into_handle_ty(),
                 loop_output_ctx.handle().into_handle_ty(),
             ],
-        );
-        let inputs_have_type = prim_fact(
-            "HasArgType",
-            vec![
+        };
+        let inputs_have_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 inputs.handle().into_handle_ty(),
                 in_type.handle().into_handle_ty(),
             ],
-        );
+        };
 
         LoopStrengthReductionConstInvariantPat::new(old_loop, loop_input_ctx, in_type, constant, c)
             .assert(inputs_context)
@@ -243,40 +243,40 @@ pub(crate) mod native {
         let add = schema_dsl::Bop::query(&schema_dsl::Add::query(), &arg_i, &loop_incr_out);
         let old_mul = schema_dsl::Bop::query(&schema_dsl::Mul::query(), &c_out, &arg_i);
 
-        let pred_and_outputs_in_loop = prim_fact(
-            "ContextOf",
-            vec![
+        let pred_and_outputs_in_loop = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 pred_and_outputs.handle().into_handle_ty(),
                 loop_ctx.handle().into_handle_ty(),
             ],
-        );
-        let loop_increment = prim_fact(
-            "lsr-inv",
-            vec![
+        };
+        let loop_increment = eggplant::wrap::FactCallConstraint {
+            op: "lsr-inv",
+            operands: vec![
                 old_loop.handle().into_handle_ty(),
                 loop_incr_in.handle().into_handle_ty(),
                 loop_incr_out.handle().into_handle_ty(),
             ],
-        );
+        };
         let body_out_matches = body_out.handle().eq(&add.handle());
         let body_index_matches = body_out
             .handle_index()
             .eq(&(arg_i.handle_index() + (&1_i64).as_handle()));
-        let invariant = prim_fact(
-            "lsr-inv",
-            vec![
+        let invariant = eggplant::wrap::FactCallConstraint {
+            op: "lsr-inv",
+            operands: vec![
                 old_loop.handle().into_handle_ty(),
                 c_in.handle().into_handle_ty(),
                 c_out.handle().into_handle_ty(),
             ],
-        );
-        let mul_in_loop = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let mul_in_loop = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 old_mul.handle().into_handle_ty(),
                 loop_ctx.handle().into_handle_ty(),
             ],
-        );
+        };
 
         LoopStrengthReductionPat::new(
             inputs,

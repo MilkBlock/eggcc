@@ -47,7 +47,7 @@ pub(crate) mod native {
         hi_bound, lo_bound, BoolB, BoolBTy, IntB, IntBTy,
     };
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{prim_fact, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     fn type_leaf<PR: PatRecSgl>() -> schema_dsl::Type<PR> {
         schema_dsl::Type::query_leaf()
@@ -61,8 +61,7 @@ pub(crate) mod native {
         IntB::query()
     }
 
-    fn bool_bound<PR: PatRecSgl>()
-    -> crate::eggplant_backend::interval_bounds::Bound<PR, BoolBTy> {
+    fn bool_bound<PR: PatRecSgl>() -> crate::eggplant_backend::interval_bounds::Bound<PR, BoolBTy> {
         BoolB::query()
     }
 
@@ -102,14 +101,17 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_int.handle());
         let lo_value_matches = lo_int.handle_value().eq(&value.handle());
         let hi_value_matches = hi_int.handle_value().eq(&value.handle());
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         IntConstFoldPat::new(expr, ty, ctx, value)
             .assert(lo_matches)
@@ -133,14 +135,17 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&value.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&value.handle());
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         BoolConstFoldPat::new(expr, ty, ctx, value)
             .assert(lo_matches)
@@ -159,14 +164,17 @@ pub(crate) mod native {
         let lo_bool = bool_bound::<PR>();
         let lo_matches = lo.handle().eq(&lo_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&true);
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         BoolKnownPat::new(expr, ty, ctx)
             .assert(lo_matches)
@@ -183,14 +191,17 @@ pub(crate) mod native {
         let hi_bool = bool_bound::<PR>();
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&false);
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         BoolKnownPat::new(expr, ty, ctx)
             .assert(hi_matches)

@@ -339,7 +339,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        prim_call, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     fn expr_leaf<PR: PatRecSgl>() -> schema_dsl::Expr<PR> {
@@ -559,13 +559,13 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 input.handle().into_handle_ty(),
                 input_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         DropAtSeedPat::new(lhs, ctx, idx, input, old_tylist)
             .assert(lhs_is_drop_at)
@@ -660,7 +660,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtTopPat::new(lhs, new_ty, new_ctx, idx, op, first, second, third)
             .assert(lhs_is_drop_internal)
@@ -685,7 +688,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtBopPat::new(lhs, new_ty, new_ctx, idx, op, lhs_inner, rhs_inner)
             .assert(lhs_is_drop_internal)
@@ -709,7 +715,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtUopPat::new(lhs, new_ty, new_ctx, idx, op, inner)
             .assert(lhs_is_drop_internal)
@@ -734,7 +743,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtGetPat::new(lhs, new_ty, new_ctx, idx, inner, index)
             .assert(matched_index)
@@ -760,7 +772,10 @@ pub(crate) mod native {
                 alloc.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![alloc.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![alloc.handle().into_handle_ty()],
+        };
 
         DropAtAllocPat::new(
             lhs, new_ty, new_ctx, idx, alloc, amount, state_edge, pointer_ty,
@@ -785,7 +800,10 @@ pub(crate) mod native {
                 call.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![call.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![call.handle().into_handle_ty()],
+        };
 
         DropAtCallPat::new(lhs, new_ty, new_ctx, idx, call, arg)
             .assert(lhs_is_drop_internal)
@@ -810,7 +828,10 @@ pub(crate) mod native {
                 switch.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![switch.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![switch.handle().into_handle_ty()],
+        };
 
         DropAtSwitchPat::new(lhs, new_ty, new_ctx, idx, pred, inputs, branches)
             .assert(lhs_is_drop_internal)
@@ -836,7 +857,10 @@ pub(crate) mod native {
                 if_expr.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![if_expr.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![if_expr.handle().into_handle_ty()],
+        };
 
         DropAtIfPat::new(
             lhs,
@@ -869,8 +893,10 @@ pub(crate) mod native {
                 loop_expr.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved =
-            prim_fact("ExprIsResolved", vec![loop_expr.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![loop_expr.handle().into_handle_ty()],
+        };
 
         DropAtDoWhilePat::new(lhs, new_ty, new_ctx, idx, inputs, body)
             .assert(lhs_is_drop_internal)
@@ -895,7 +921,10 @@ pub(crate) mod native {
                 function.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![body.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![body.handle().into_handle_ty()],
+        };
 
         DropAtFunctionPat::new(
             lhs, new_ty, new_ctx, idx, function, input_ty, output_ty, body,
@@ -920,7 +949,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtSinglePat::new(lhs, new_ty, new_ctx, idx, inner)
             .assert(lhs_is_drop_internal)
@@ -944,7 +976,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = prim_fact("ExprIsResolved", vec![matched.handle().into_handle_ty()]);
+        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsResolved",
+            operands: vec![matched.handle().into_handle_ty()],
+        };
 
         DropAtConcatPat::new(lhs, new_ty, new_ctx, idx, lhs_inner, rhs_inner)
             .assert(lhs_is_drop_internal)

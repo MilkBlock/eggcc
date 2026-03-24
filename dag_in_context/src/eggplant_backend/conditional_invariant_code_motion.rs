@@ -193,8 +193,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
-        RuleRunnerSgl, RuleSetId,
+        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
     };
     use eggplant::wrap::EgglogTy;
 
@@ -229,10 +229,10 @@ pub(crate) mod native {
             "ExtractedExpr",
             vec![e1.handle().into_handle_ty()],
         ));
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![e1.handle().into_handle_ty(), ctx1.handle().into_handle_ty()],
-        );
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![e1.handle().into_handle_ty(), ctx1.handle().into_handle_ty()],
+        };
 
         CicmIndexExtractedExprCachePat::new(t1, e1, ctx1)
             .assert(extracted_expr)
@@ -274,22 +274,22 @@ pub(crate) mod native {
                 orig_ins4.handle().into_handle_ty(),
             ],
         );
-        let true_branch_cache = prim_fact(
-            "ExtractedExprCache",
-            vec![
+        let true_branch_cache = eggplant::wrap::FactCallConstraint {
+            op: "ExtractedExprCache",
+            operands: vec![
                 t1.handle().into_handle_ty(),
                 e1.handle().into_handle_ty(),
                 true_if_ctx.into_handle_ty(),
             ],
-        );
-        let false_branch_cache = prim_fact(
-            "ExtractedExprCache",
-            vec![
+        };
+        let false_branch_cache = eggplant::wrap::FactCallConstraint {
+            op: "ExtractedExprCache",
+            operands: vec![
                 t1.handle().into_handle_ty(),
                 e2.handle().into_handle_ty(),
                 false_if_ctx.into_handle_ty(),
             ],
-        );
+        };
         let distinct_exprs = e1.handle().ne(&e2.handle());
 
         CicmIndexCandidatePat::new(t1, e1, e2, pred1, pred2, orig_ins3, orig_ins4)
@@ -358,50 +358,54 @@ pub(crate) mod native {
         let if_match = if_e
             .handle()
             .eq(&schema_dsl::If::query(&pred, &orig_ins, &thn, &els).handle());
-        let then_has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let then_has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 thn.handle().into_handle_ty(),
                 tuple_ty.handle().into_handle_ty(),
             ],
-        );
-        let else_has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        };
+        let else_has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 els.handle().into_handle_ty(),
                 tuple_ty.handle().into_handle_ty(),
             ],
-        );
-        let if_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let if_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 outer_ctx.handle().into_handle_ty(),
             ],
-        );
+        };
         let e1_match = e1.handle().eq(&schema_dsl::Uop::query(&op, &x).handle());
-        let e1_has_type = prim_fact(
-            "HasType",
-            vec![
+        let e1_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 e1.handle().into_handle_ty(),
                 base_ty.handle().into_handle_ty(),
             ],
-        );
-        let e1_size = size1
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![e1.handle().into_handle_ty()]));
-        let e1_small = prim_fact(
-            ">",
-            vec![
+        };
+        let e1_size = size1.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![e1.handle().into_handle_ty()],
+        ));
+        let e1_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size1.handle().into_handle_ty(),
             ],
-        );
-        let e1_pure = prim_fact("ExprIsPure", vec![e1.handle().into_handle_ty()]);
-        let e1_context = prim_fact(
-            "ContextOf",
-            vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
-        );
+        };
+        let e1_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![e1.handle().into_handle_ty()],
+        };
+        let e1_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
+        };
         let e1_extracted = prim_call::<TermAndCostTy>(
             "TCPair",
             vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
@@ -411,28 +415,32 @@ pub(crate) mod native {
             vec![e1.handle().into_handle_ty()],
         ));
         let e2_match = e2.handle().eq(&schema_dsl::Uop::query(&op, &y).handle());
-        let e2_has_type = prim_fact(
-            "HasType",
-            vec![
+        let e2_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 e2.handle().into_handle_ty(),
                 base_ty.handle().into_handle_ty(),
             ],
-        );
-        let e2_size = size2
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![e2.handle().into_handle_ty()]));
-        let e2_small = prim_fact(
-            ">",
-            vec![
+        };
+        let e2_size = size2.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![e2.handle().into_handle_ty()],
+        ));
+        let e2_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size2.handle().into_handle_ty(),
             ],
-        );
-        let e2_pure = prim_fact("ExprIsPure", vec![e2.handle().into_handle_ty()]);
-        let e2_context = prim_fact(
-            "ContextOf",
-            vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
-        );
+        };
+        let e2_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![e2.handle().into_handle_ty()],
+        };
+        let e2_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
+        };
         let e2_extracted = prim_call::<TermAndCostTy>(
             "TCPair",
             vec![t1.handle().into_handle_ty(), c2.handle().into_handle_ty()],
@@ -526,62 +534,62 @@ pub(crate) mod native {
             ],
         );
 
-        let inv_candidate = prim_fact(
-            "InvCodeMotionCandidate",
-            vec![e1.handle().into_handle_ty(), e2.handle().into_handle_ty()],
-        );
+        let inv_candidate = eggplant::wrap::FactCallConstraint {
+            op: "InvCodeMotionCandidate",
+            operands: vec![e1.handle().into_handle_ty(), e2.handle().into_handle_ty()],
+        };
         let if_match = if_e
             .handle()
             .eq(&schema_dsl::If::query(&pred, &orig_ins, &thn, &els).handle());
-        let then_has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let then_has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 thn.handle().into_handle_ty(),
                 tuple_ty.handle().into_handle_ty(),
             ],
-        );
-        let else_has_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        };
+        let else_has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 els.handle().into_handle_ty(),
                 tuple_ty.handle().into_handle_ty(),
             ],
-        );
-        let if_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let if_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 outer_ctx.handle().into_handle_ty(),
             ],
-        );
-        let e1_context = prim_fact(
-            "ContextOf",
-            vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
-        );
-        let e2_context = prim_fact(
-            "ContextOf",
-            vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
-        );
+        };
+        let e1_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
+        };
+        let e2_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
+        };
         let e1_match = e1
             .handle()
             .eq(&schema_dsl::Bop::query(&op, &x1, &y1).handle());
         let e2_match = e2
             .handle()
             .eq(&schema_dsl::Bop::query(&op, &x2, &y2).handle());
-        let e1_has_type = prim_fact(
-            "HasType",
-            vec![
+        let e1_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 e1.handle().into_handle_ty(),
                 base_ty.handle().into_handle_ty(),
             ],
-        );
-        let e2_has_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let e2_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 e2.handle().into_handle_ty(),
                 base_ty.handle().into_handle_ty(),
             ],
-        );
+        };
         let e1_extracted = prim_call::<TermAndCostTy>(
             "TCPair",
             vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
@@ -598,28 +606,36 @@ pub(crate) mod native {
             "ExtractedExpr",
             vec![e2.handle().into_handle_ty()],
         ));
-        let e1_size = size1
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![e1.handle().into_handle_ty()]));
-        let e2_size = size2
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![e2.handle().into_handle_ty()]));
-        let e1_small = prim_fact(
-            ">",
-            vec![
+        let e1_size = size1.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![e1.handle().into_handle_ty()],
+        ));
+        let e2_size = size2.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![e2.handle().into_handle_ty()],
+        ));
+        let e1_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size1.handle().into_handle_ty(),
             ],
-        );
-        let e2_small = prim_fact(
-            ">",
-            vec![
+        };
+        let e2_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size2.handle().into_handle_ty(),
             ],
-        );
-        let e1_pure = prim_fact("ExprIsPure", vec![e1.handle().into_handle_ty()]);
-        let e2_pure = prim_fact("ExprIsPure", vec![e2.handle().into_handle_ty()]);
+        };
+        let e1_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![e1.handle().into_handle_ty()],
+        };
+        let e2_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![e2.handle().into_handle_ty()],
+        };
 
         CicmBopPat::new(
             if_e, pred, orig_ins, thn, els, outer_ctx, tylist, ty, e1, e2, op, x1, y1, x2, y2, t1,

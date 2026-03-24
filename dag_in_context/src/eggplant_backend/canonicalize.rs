@@ -246,21 +246,10 @@ const CANONICALIZE_SUPPORT: &str = r#"(ruleset canon)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::{insert_call, Inserted};
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use crate::eggplant_backend::schema_dsl::{ConstantRuleCtx, ExprRuleCtx};
-    use eggplant::prelude::{prim_fact, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
-
-    fn insert_bop(
-        ctx: &eggplant::wrap::RuleCtx,
-        op_name: &'static str,
-        lhs: eggplant::egglog::Value,
-        rhs: eggplant::egglog::Value,
-    ) -> Inserted<schema_dsl::Expr> {
-        let op = insert_call::<schema_dsl::BinaryOp>(ctx, op_name, &[]);
-        insert_call::<schema_dsl::Expr>(ctx, "Bop", &[op.0.val, lhs, rhs])
-    }
+    use crate::eggplant_backend::schema_dsl::{BinaryOpRuleCtx, ConstantRuleCtx, ExprRuleCtx};
+    use eggplant::prelude::{IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct CanonBopPat<PR: PatRecSgl> {
@@ -334,14 +323,17 @@ pub(crate) mod native {
         let ctx = schema_dsl::Assumption::query_leaf();
         let bop = schema_dsl::Bop::query(&schema_dsl::GreaterEq::query(), &x, &y);
         let expr_is_bop = expr.handle().eq(&bop.handle());
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![x.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![x.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         CanonTypedBopPat::new(expr, x, y, ty, ctx)
             .assert(expr_is_bop)
@@ -357,14 +349,17 @@ pub(crate) mod native {
         let ctx = schema_dsl::Assumption::query_leaf();
         let bop = schema_dsl::Bop::query(&schema_dsl::LessEq::query(), &x, &y);
         let expr_is_bop = expr.handle().eq(&bop.handle());
-        let has_arg_type = prim_fact(
-            "HasArgType",
-            vec![y.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        );
-        let context_of = prim_fact(
-            "ContextOf",
-            vec![expr.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
+        let has_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![y.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        };
+        let context_of = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                expr.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
 
         CanonTypedBopPat::new(expr, x, y, ty, ctx)
             .assert(expr_is_bop)
@@ -380,7 +375,10 @@ pub(crate) mod native {
             ruleset,
             add_commute_pat,
             |ctx, pat| {
-                ctx.union(pat.bop, insert_bop(&ctx.ctx, "Add", pat.y.val, pat.x.val));
+                ctx.union(
+                    pat.bop,
+                    ctx.ctx.insert_bop(ctx.ctx.insert_add(), pat.y, pat.x),
+                );
             },
         );
         PeepholeTx::add_rule(
@@ -388,7 +386,10 @@ pub(crate) mod native {
             ruleset,
             mul_commute_pat,
             |ctx, pat| {
-                ctx.union(pat.bop, insert_bop(&ctx.ctx, "Mul", pat.y.val, pat.x.val));
+                ctx.union(
+                    pat.bop,
+                    ctx.ctx.insert_bop(ctx.ctx.insert_mul(), pat.y, pat.x),
+                );
             },
         );
         PeepholeTx::add_rule(
@@ -396,7 +397,10 @@ pub(crate) mod native {
             ruleset,
             eq_commute_pat,
             |ctx, pat| {
-                ctx.union(pat.bop, insert_bop(&ctx.ctx, "Eq", pat.y.val, pat.x.val));
+                ctx.union(
+                    pat.bop,
+                    ctx.ctx.insert_bop(ctx.ctx.insert_eq(), pat.y, pat.x),
+                );
             },
         );
         PeepholeTx::add_rule(
@@ -404,7 +408,10 @@ pub(crate) mod native {
             ruleset,
             and_commute_pat,
             |ctx, pat| {
-                ctx.union(pat.bop, insert_bop(&ctx.ctx, "And", pat.y.val, pat.x.val));
+                ctx.union(
+                    pat.bop,
+                    ctx.ctx.insert_bop(ctx.ctx.insert_and(), pat.y, pat.x),
+                );
             },
         );
         PeepholeTx::add_rule(
@@ -412,7 +419,10 @@ pub(crate) mod native {
             ruleset,
             or_commute_pat,
             |ctx, pat| {
-                ctx.union(pat.bop, insert_bop(&ctx.ctx, "Or", pat.y.val, pat.x.val));
+                ctx.union(
+                    pat.bop,
+                    ctx.ctx.insert_bop(ctx.ctx.insert_or(), pat.y, pat.x),
+                );
             },
         );
         PeepholeTx::add_rule(
@@ -422,7 +432,7 @@ pub(crate) mod native {
             |ctx, pat| {
                 ctx.union(
                     pat.bop,
-                    insert_bop(&ctx.ctx, "LessThan", pat.y.val, pat.x.val),
+                    ctx.ctx.insert_bop(ctx.ctx.insert_less_than(), pat.y, pat.x),
                 );
             },
         );
@@ -433,32 +443,36 @@ pub(crate) mod native {
             |ctx, pat| {
                 let one = ctx.ctx.insert_int(1);
                 let one_const = ctx.ctx.insert_const(one, pat.ty, pat.ctx);
-                let x_plus_one = insert_bop(&ctx.ctx, "Add", pat.x.val, one_const.val);
-                let y_minus_one = insert_bop(&ctx.ctx, "Sub", pat.y.val, one_const.val);
+                let x_plus_one = ctx.ctx.insert_bop(ctx.ctx.insert_add(), pat.x, one_const);
+                let y_minus_one = ctx.ctx.insert_bop(ctx.ctx.insert_sub(), pat.y, one_const);
 
                 ctx.union(
                     pat.expr,
-                    insert_bop(&ctx.ctx, "LessThan", pat.y.val, x_plus_one.0.val),
+                    ctx.ctx
+                        .insert_bop(ctx.ctx.insert_less_than(), pat.y, x_plus_one),
                 );
                 ctx.union(
                     pat.expr,
-                    insert_bop(&ctx.ctx, "LessThan", y_minus_one.0.val, pat.x.val),
+                    ctx.ctx
+                        .insert_bop(ctx.ctx.insert_less_than(), y_minus_one, pat.x),
                 );
             },
         );
         PeepholeTx::add_rule("canonicalize_less_eq", ruleset, less_eq_pat, |ctx, pat| {
             let one = ctx.ctx.insert_int(1);
             let one_const = ctx.ctx.insert_const(one, pat.ty, pat.ctx);
-            let y_plus_one = insert_bop(&ctx.ctx, "Add", pat.y.val, one_const.val);
-            let x_minus_one = insert_bop(&ctx.ctx, "Sub", pat.x.val, one_const.val);
+            let y_plus_one = ctx.ctx.insert_bop(ctx.ctx.insert_add(), pat.y, one_const);
+            let x_minus_one = ctx.ctx.insert_bop(ctx.ctx.insert_sub(), pat.x, one_const);
 
             ctx.union(
                 pat.expr,
-                insert_bop(&ctx.ctx, "LessThan", pat.x.val, y_plus_one.0.val),
+                ctx.ctx
+                    .insert_bop(ctx.ctx.insert_less_than(), pat.x, y_plus_one),
             );
             ctx.union(
                 pat.expr,
-                insert_bop(&ctx.ctx, "LessThan", x_minus_one.0.val, pat.y.val),
+                ctx.ctx
+                    .insert_bop(ctx.ctx.insert_less_than(), x_minus_one, pat.y),
             );
         });
 

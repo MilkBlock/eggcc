@@ -58,8 +58,10 @@ pub(crate) mod native {
         expr: &schema_dsl::Expr<PR>,
         out: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        out.handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![expr.handle().into_handle_ty()]))
+        out.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![expr.handle().into_handle_ty()],
+        ))
     }
 
     fn list_expr_size_query<PR: PatRecSgl>(
@@ -396,7 +398,9 @@ pub(crate) mod native {
 
     fn nil_size_pat<PR: PatRecSgl>() -> ListLeafPat<PR> {
         let list = list_expr_leaf::<PR>();
-        let list_is_nil = list.handle().eq(&prim_call::<schema_dsl::ListExpr>("Nil", vec![]));
+        let list_is_nil = list
+            .handle()
+            .eq(&prim_call::<schema_dsl::ListExpr>("Nil", vec![]));
 
         ListLeafPat::new(list).assert(list_is_nil)
     }

@@ -129,7 +129,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -192,10 +192,10 @@ pub(crate) mod native {
         let outerif = schema_dsl::If::query(&cond, &inputs, &evenbr, &oddbr);
 
         let n = schema_dsl::Get::query(&inputs);
-        let cond_is_even = prim_fact(
-            "IsIsEven",
-            vec![cond.handle().into_handle_ty(), n.handle().into_handle_ty()],
-        );
+        let cond_is_even = eggplant::wrap::FactCallConstraint {
+            op: "IsIsEven",
+            operands: vec![cond.handle().into_handle_ty(), n.handle().into_handle_ty()],
+        };
 
         let lp_inputs = schema_dsl::Expr::query_leaf();
         let lp_pred_outputs = schema_dsl::Expr::query_leaf();
@@ -214,13 +214,13 @@ pub(crate) mod native {
         let nd2 = schema_dsl::Bop::query(&schema_dsl::Div::query(), &arg_j, &two);
         let pred0 = schema_dsl::Get::query(&lp_pred_outputs);
         let pred0_is_first = pred0.handle_index().eq(&(&0_i64).as_handle());
-        let pred_is_even = prim_fact(
-            "IsIsEven",
-            vec![
+        let pred_is_even = eggplant::wrap::FactCallConstraint {
+            op: "IsIsEven",
+            operands: vec![
                 pred0.handle().into_handle_ty(),
                 nd2.handle().into_handle_ty(),
             ],
-        );
+        };
         let pred_next = schema_dsl::Get::query(&lp_pred_outputs);
         let pred_next_matches = pred_next.handle().eq(&nd2.handle());
         let pred_next_index_matches = pred_next
@@ -266,14 +266,14 @@ pub(crate) mod native {
 
         let n = schema_dsl::Expr::query_leaf();
         let outer_i = schema_dsl::Get::query(&outerif);
-        let ntz = prim_fact(
-            "NTZIterations",
-            vec![
+        let ntz = eggplant::wrap::FactCallConstraint {
+            op: "NTZIterations",
+            operands: vec![
                 outerif.handle().into_handle_ty(),
                 n.handle().into_handle_ty(),
                 outer_i.handle_index().into_handle_ty(),
             ],
-        );
+        };
 
         let lp_inputs = schema_dsl::Expr::query_leaf();
         let lp_pred_outputs = schema_dsl::Expr::query_leaf();
@@ -334,14 +334,14 @@ pub(crate) mod native {
         let anyif = schema_dsl::If::query(&cond, &inputs, &thenbr, &elsebr);
         let n = schema_dsl::Expr::query_leaf();
         let outer_i = schema_dsl::Get::query(&anyif);
-        let ntz = prim_fact(
-            "NTZIterations",
-            vec![
+        let ntz = eggplant::wrap::FactCallConstraint {
+            op: "NTZIterations",
+            operands: vec![
                 anyif.handle().into_handle_ty(),
                 n.handle().into_handle_ty(),
                 outer_i.handle_index().into_handle_ty(),
             ],
-        );
+        };
 
         let lpinputs = schema_dsl::Expr::query_leaf();
         let pred_outputs = schema_dsl::Expr::query_leaf();
@@ -354,13 +354,13 @@ pub(crate) mod native {
         let pred_next_index_matches = pred_next
             .handle_index()
             .eq(&(arg_j.handle_index() + (&1_i64).as_handle()));
-        let has_state_type = prim_fact(
-            "HasType",
-            vec![
+        let has_state_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 pred_next.handle().into_handle_ty(),
                 state_type::<PR>().handle().into_handle_ty(),
             ],
-        );
+        };
 
         HackerLoopStateEdgePat::new(n, thenbr, lpinputs, pred_outputs, arg_j)
             .assert(ntz)

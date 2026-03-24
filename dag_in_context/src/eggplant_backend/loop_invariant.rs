@@ -156,8 +156,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
-        RuleRunnerSgl, RuleSetId,
+        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -186,17 +186,17 @@ pub(crate) mod native {
         let body = schema_dsl::Expr::query_leaf();
         let list = schema_dsl::ListExpr::query_leaf();
         let i = BaseVar::<i64, PR>::query_named("list_index");
-        let helper_entry = prim_fact(
-            "is-inv-ListExpr-helper",
-            vec![
+        let helper_entry = eggplant::wrap::FactCallConstraint {
+            op: "is-inv-ListExpr-helper",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 list.handle().into_handle_ty(),
                 i.handle().into_handle_ty(),
             ],
-        );
-        let ith_is_inv = prim_fact(
-            "is-inv-Expr",
-            vec![
+        };
+        let ith_is_inv = eggplant::wrap::FactCallConstraint {
+            op: "is-inv-Expr",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 prim_call::<schema_dsl::Expr>(
                     "ListExpr-ith",
@@ -204,7 +204,7 @@ pub(crate) mod native {
                 )
                 .into_handle_ty(),
             ],
-        );
+        };
 
         LoopInvariantListHelperRecursePat::new(body, list, i)
             .assert(helper_entry)
@@ -222,14 +222,14 @@ pub(crate) mod native {
         let body = schema_dsl::Expr::query_leaf();
         let list = schema_dsl::ListExpr::query_leaf();
         let i = BaseVar::<i64, PR>::query_named("list_index");
-        let helper_entry = prim_fact(
-            "is-inv-ListExpr-helper",
-            vec![
+        let helper_entry = eggplant::wrap::FactCallConstraint {
+            op: "is-inv-ListExpr-helper",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 list.handle().into_handle_ty(),
                 i.handle().into_handle_ty(),
             ],
-        );
+        };
         let reaches_end = list_expr_length_query(&list, &i);
 
         LoopInvariantListHelperFinishPat::new(body, list)
@@ -295,55 +295,59 @@ pub(crate) mod native {
         body: &schema_dsl::Expr<PR>,
         expr: &schema_dsl::Expr<PR>,
     ) -> eggplant::wrap::FactCallConstraint {
-        prim_fact(
-            "BodyContainsExpr",
-            vec![
+        eggplant::wrap::FactCallConstraint {
+            op: "BodyContainsExpr",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 expr.handle().into_handle_ty(),
             ],
-        )
+        }
     }
 
     fn body_contains_list_expr<PR: PatRecSgl>(
         body: &schema_dsl::Expr<PR>,
         list: &schema_dsl::ListExpr<PR>,
     ) -> eggplant::wrap::FactCallConstraint {
-        prim_fact(
-            "BodyContainsListExpr",
-            vec![
+        eggplant::wrap::FactCallConstraint {
+            op: "BodyContainsListExpr",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 list.handle().into_handle_ty(),
             ],
-        )
+        }
     }
 
     fn is_inv_expr<PR: PatRecSgl>(
         body: &schema_dsl::Expr<PR>,
         expr: &schema_dsl::Expr<PR>,
     ) -> eggplant::wrap::FactCallConstraint {
-        prim_fact(
-            "is-inv-Expr",
-            vec![
+        eggplant::wrap::FactCallConstraint {
+            op: "is-inv-Expr",
+            operands: vec![
                 body.handle().into_handle_ty(),
                 expr.handle().into_handle_ty(),
             ],
-        )
+        }
     }
 
     fn expr_size_query<PR: PatRecSgl>(
         expr: &schema_dsl::Expr<PR>,
         size: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        size.handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![expr.handle().into_handle_ty()]))
+        size.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![expr.handle().into_handle_ty()],
+        ))
     }
 
     fn list_expr_length_query<PR: PatRecSgl>(
         list: &schema_dsl::ListExpr<PR>,
         len: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        len.handle()
-            .eq(&prim_call::<i64>("ListExpr-length", vec![list.handle().into_handle_ty()]))
+        len.handle().eq(&prim_call::<i64>(
+            "ListExpr-length",
+            vec![list.handle().into_handle_ty()],
+        ))
     }
 
     #[eggplant::pat_vars]
@@ -477,7 +481,10 @@ pub(crate) mod native {
         let top_expr = schema_dsl::Top::query(&op, &a, &b, &c);
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_top = expr.handle().eq(&top_expr.handle());
-        let op_is_pure = prim_fact("TernaryOpIsPure", vec![op.handle().into_handle_ty()]);
+        let op_is_pure = eggplant::wrap::FactCallConstraint {
+            op: "TernaryOpIsPure",
+            operands: vec![op.handle().into_handle_ty()],
+        };
         let a_is_inv = is_inv_expr(&body, &a);
         let b_is_inv = is_inv_expr(&body, &b);
         let c_is_inv = is_inv_expr(&body, &c);
@@ -510,7 +517,10 @@ pub(crate) mod native {
         let expr_is_bop = expr
             .handle()
             .eq(&schema_dsl::Bop::query(&op, &lhs, &rhs).handle());
-        let op_is_pure = prim_fact("BinaryOpIsPure", vec![op.handle().into_handle_ty()]);
+        let op_is_pure = eggplant::wrap::FactCallConstraint {
+            op: "BinaryOpIsPure",
+            operands: vec![op.handle().into_handle_ty()],
+        };
         let lhs_is_inv = is_inv_expr(&body, &lhs);
         let rhs_is_inv = is_inv_expr(&body, &rhs);
 
@@ -540,7 +550,10 @@ pub(crate) mod native {
         let expr_is_uop = expr
             .handle()
             .eq(&schema_dsl::Uop::query(&op, &inner).handle());
-        let op_is_pure = prim_fact("UnaryOpIsPure", vec![op.handle().into_handle_ty()]);
+        let op_is_pure = eggplant::wrap::FactCallConstraint {
+            op: "UnaryOpIsPure",
+            operands: vec![op.handle().into_handle_ty()],
+        };
         let inner_is_inv = is_inv_expr(&body, &inner);
 
         LoopInvariantGeneratedUopPat::new(body, expr, loop_expr)
@@ -622,7 +635,10 @@ pub(crate) mod native {
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_call = expr.handle().eq(&schema_dsl::Call::query(&arg).handle());
         let arg_is_inv = is_inv_expr(&body, &arg);
-        let expr_is_pure = prim_fact("ExprIsPure", vec![expr.handle().into_handle_ty()]);
+        let expr_is_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![expr.handle().into_handle_ty()],
+        };
 
         LoopInvariantGeneratedCallPat::new(body, expr, loop_expr)
             .assert(body_contains_expr)
@@ -676,7 +692,10 @@ pub(crate) mod native {
             expr.handle()
                 .eq(&schema_dsl::DoWhile::query(&inner_inputs, &pred_and_outputs).handle());
         let inner_inputs_is_inv = is_inv_expr(&body, &inner_inputs);
-        let expr_is_pure = prim_fact("ExprIsPure", vec![expr.handle().into_handle_ty()]);
+        let expr_is_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![expr.handle().into_handle_ty()],
+        };
 
         LoopInvariantGeneratedDoWhilePat::new(body, expr, loop_expr)
             .assert(body_contains_expr)
@@ -730,15 +749,15 @@ pub(crate) mod native {
         let base_inv_ty = base_type_leaf::<PR>();
         let size = BaseVar::<i64, PR>::query_named("inv_size");
         let expr_is_inv = is_inv_expr(&body, &expr);
-        let expr_has_base_type = prim_fact(
-            "HasType",
-            vec![
+        let expr_has_base_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 expr.handle().into_handle_ty(),
                 schema_dsl::Base::query(&base_inv_ty)
                     .handle()
                     .into_handle_ty(),
             ],
-        );
+        };
         let expr_size = expr_size_query(&expr, &size);
 
         LoopInvariantBoundaryAnalysisPrepPat::new(inputs, body, size, loop_expr)
@@ -764,15 +783,15 @@ pub(crate) mod native {
         let base_inv_ty = base_type_leaf::<PR>();
         let size = BaseVar::<i64, PR>::query_named("inv_size");
         let expr_is_inv = is_inv_expr(&body, &expr);
-        let expr_has_base_type = prim_fact(
-            "HasType",
-            vec![
+        let expr_has_base_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 expr.handle().into_handle_ty(),
                 schema_dsl::Base::query(&base_inv_ty)
                     .handle()
                     .into_handle_ty(),
             ],
-        );
+        };
         let expr_size = expr_size_query(&expr, &size);
         let matches_best_size = size.handle().eq(&prim_call::<i64>(
             "to-hoist-size",
@@ -817,41 +836,42 @@ pub(crate) mod native {
             ],
         ));
         let inv_size_fact = expr_size_query(&inv, &inv_size);
-        let inv_is_large_enough = prim_fact(
-            ">",
-            vec![
+        let inv_is_large_enough = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 inv_size.handle().into_handle_ty(),
                 (&1_i64).as_handle().into_handle_ty(),
             ],
-        );
-        let loop_has_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let loop_has_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 loop_expr.handle().into_handle_ty(),
                 loop_ctx.handle().into_handle_ty(),
             ],
-        );
-        let input_has_tuple_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let input_has_tuple_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 in_expr.handle().into_handle_ty(),
                 schema_dsl::TupleT::query(&tylist).handle().into_handle_ty(),
             ],
-        );
-        let invariant_has_base_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let invariant_has_base_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 inv.handle().into_handle_ty(),
                 schema_dsl::Base::query(&base_inv_ty)
                     .handle()
                     .into_handle_ty(),
             ],
-        );
+        };
         let len = BaseVar::<i64, PR>::query_named("len");
         let iter_guess = BaseVar::<i64, PR>::query_named("iter_guess");
-        let input_tuple_len = len
-            .handle()
-            .eq(&prim_call::<i64>("tuple-length", vec![in_expr.handle().into_handle_ty()]));
+        let input_tuple_len = len.handle().eq(&prim_call::<i64>(
+            "tuple-length",
+            vec![in_expr.handle().into_handle_ty()],
+        ));
         let iter_guess = iter_guess.handle().eq(&prim_call::<i64>(
             "LoopNumItersGuess",
             vec![

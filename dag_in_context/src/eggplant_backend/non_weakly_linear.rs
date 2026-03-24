@@ -85,7 +85,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -183,17 +183,17 @@ pub(crate) mod native {
         let ctx = schema_dsl::Assumption::query_leaf();
         let inputs_ty = schema_dsl::Type::query_leaf();
 
-        let loop_context = prim_fact(
-            "ContextOf",
-            vec![lhs.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
-        let inputs_have_type = prim_fact(
-            "HasType",
-            vec![
+        let loop_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![lhs.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
+        };
+        let inputs_have_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 inputs.handle().into_handle_ty(),
                 inputs_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         LoopPeelPat::new(lhs, inputs, outputs, ctx, inputs_ty)
             .assert(loop_context)

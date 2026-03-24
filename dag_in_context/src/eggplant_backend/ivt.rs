@@ -243,8 +243,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
-        RuleRunnerSgl, RuleSetId,
+        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
     };
     use eggplant::wrap::EgglogTy;
 
@@ -310,10 +310,10 @@ pub(crate) mod native {
         let if_matches = if_eclass.handle().eq(&if_expr.handle());
         let same_get = loop_get.handle().eq(&if_get.handle());
         let not_pred_slot = loop_get.handle_index().ne(&0_i64);
-        let demand = prim_fact(
-            "IVTNewInputsAnalysisDemand",
-            vec![loop_body.handle().into_handle_ty()],
-        );
+        let demand = eggplant::wrap::FactCallConstraint {
+            op: "IVTNewInputsAnalysisDemand",
+            operands: vec![loop_body.handle().into_handle_ty()],
+        };
 
         IvtSeedPat::new(
             loop_body,
@@ -449,13 +449,13 @@ pub(crate) mod native {
         let shifted_index = loop_get
             .handle_index()
             .eq(&(arg_get.handle_index() + (&1_i64).as_handle()));
-        let arg_has_base_type = prim_fact(
-            "HasType",
-            vec![
+        let arg_has_base_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 arg_get.handle().into_handle_ty(),
                 schema_dsl::Base::query(&new_ty).handle().into_handle_ty(),
             ],
-        );
+        };
         let analysis_res = prim_call::<IVTResTy>(
             "IVTAnalysisRes",
             vec![
@@ -483,9 +483,10 @@ pub(crate) mod native {
                 if_node.into_handle_ty(),
             ],
         ));
-        let if_len_known = if_len
-            .handle()
-            .eq(&prim_call::<i64>("tuple-length", vec![if_eclass.handle().into_handle_ty()]));
+        let if_len_known = if_len.handle().eq(&prim_call::<i64>(
+            "tuple-length",
+            vec![if_eclass.handle().into_handle_ty()],
+        ));
 
         IvtRecursePassthroughPat::new(
             loop_body,
@@ -621,13 +622,13 @@ pub(crate) mod native {
         let shifted_index = loop_get
             .handle_index()
             .eq(&(arg_get.handle_index() + (&1_i64).as_handle()));
-        let arg_has_base_type = prim_fact(
-            "HasType",
-            vec![
+        let arg_has_base_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 arg_get.handle().into_handle_ty(),
                 schema_dsl::Base::query(&new_ty).handle().into_handle_ty(),
             ],
-        );
+        };
         let analysis_matches = prim_call::<IVTResTy>(
             "IVTAnalysisRes",
             vec![
@@ -655,9 +656,10 @@ pub(crate) mod native {
                 .into_handle_ty(),
             ],
         ));
-        let if_len_known = if_len
-            .handle()
-            .eq(&prim_call::<i64>("tuple-length", vec![if_eclass.handle().into_handle_ty()]));
+        let if_len_known = if_len.handle().eq(&prim_call::<i64>(
+            "tuple-length",
+            vec![if_eclass.handle().into_handle_ty()],
+        ));
 
         IvtFinishPassthroughPat::new(
             loop_body,
@@ -742,27 +744,27 @@ pub(crate) mod native {
                 else_branch.handle().into_handle_ty(),
             ],
         ));
-        let outer_context = prim_fact(
-            "ContextOf",
-            vec![
+        let outer_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 inp_w.handle().into_handle_ty(),
                 outer_ctx.handle().into_handle_ty(),
             ],
-        );
-        let if_context = prim_fact(
-            "ContextOf",
-            vec![
+        };
+        let if_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_inputs.handle().into_handle_ty(),
                 if_ctx.handle().into_handle_ty(),
             ],
-        );
-        let if_inputs_have_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let if_inputs_have_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 if_inputs.handle().into_handle_ty(),
                 inputs_ty.handle().into_handle_ty(),
             ],
-        );
+        };
 
         LoopInversionPat::new(
             loop_expr,

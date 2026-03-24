@@ -101,9 +101,7 @@ pub(crate) mod native {
     use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{
-        prim_fact, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
-    };
+    use eggplant::prelude::{Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct PushInPat<PR: PatRecSgl> {
@@ -140,36 +138,39 @@ pub(crate) mod native {
         let x_ty = schema_dsl::BaseType::query_leaf();
         let x_ty_expr = schema_dsl::Base::query(&x_ty);
 
-        let if_context = prim_fact(
-            "ContextOf",
-            vec![
+        let if_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
                 if_e.handle().into_handle_ty(),
                 outer_ctx.handle().into_handle_ty(),
             ],
-        );
+        };
         let input_matches = orig_input_i.handle().eq(&pushed_expr.handle());
-        let then_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        let then_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 thn.handle().into_handle_ty(),
                 branch_arg_ty.handle().into_handle_ty(),
             ],
-        );
-        let else_arg_type = prim_fact(
-            "HasArgType",
-            vec![
+        };
+        let else_arg_type = eggplant::wrap::FactCallConstraint {
+            op: "HasArgType",
+            operands: vec![
                 els.handle().into_handle_ty(),
                 branch_arg_ty.handle().into_handle_ty(),
             ],
-        );
-        let x_has_type = prim_fact(
-            "HasType",
-            vec![
+        };
+        let x_has_type = eggplant::wrap::FactCallConstraint {
+            op: "HasType",
+            operands: vec![
                 x.handle().into_handle_ty(),
                 x_ty_expr.handle().into_handle_ty(),
             ],
-        );
-        let pure_base = prim_fact("PureBaseType", vec![x_ty.handle().into_handle_ty()]);
+        };
+        let pure_base = eggplant::wrap::FactCallConstraint {
+            op: "PureBaseType",
+            operands: vec![x_ty.handle().into_handle_ty()],
+        };
 
         PushInPat::new(
             if_e,

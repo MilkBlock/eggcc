@@ -141,8 +141,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
-        RuleRunnerSgl, RuleSetId,
+        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
     };
     use eggplant::wrap::EgglogTy;
 
@@ -185,32 +185,43 @@ pub(crate) mod native {
 
         let same_then_index = if_out.handle_index().eq(&thn_out.handle_index());
         let same_else_index = if_out.handle_index().eq(&els_out.handle_index());
-        let thn_pure = prim_fact("ExprIsPure", vec![thn_out.handle().into_handle_ty()]);
-        let els_pure = prim_fact("ExprIsPure", vec![els_out.handle().into_handle_ty()]);
-        let if_context = prim_fact(
-            "ContextOf",
-            vec![if_e.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        );
-        let thn_size = size1
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![thn_out.handle().into_handle_ty()]));
-        let els_size = size2
-            .handle()
-            .eq(&prim_call::<i64>("Expr-size", vec![els_out.handle().into_handle_ty()]));
-        let thn_small = prim_fact(
-            ">",
-            vec![
+        let thn_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![thn_out.handle().into_handle_ty()],
+        };
+        let els_pure = eggplant::wrap::FactCallConstraint {
+            op: "ExprIsPure",
+            operands: vec![els_out.handle().into_handle_ty()],
+        };
+        let if_context = eggplant::wrap::FactCallConstraint {
+            op: "ContextOf",
+            operands: vec![
+                if_e.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        };
+        let thn_size = size1.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![thn_out.handle().into_handle_ty()],
+        ));
+        let els_size = size2.handle().eq(&prim_call::<i64>(
+            "Expr-size",
+            vec![els_out.handle().into_handle_ty()],
+        ));
+        let thn_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size1.handle().into_handle_ty(),
             ],
-        );
-        let els_small = prim_fact(
-            ">",
-            vec![
+        };
+        let els_small = eggplant::wrap::FactCallConstraint {
+            op: ">",
+            operands: vec![
                 (&10_i64).as_handle().into_handle_ty(),
                 size2.handle().into_handle_ty(),
             ],
-        );
+        };
         let thn_extracted = prim_call::<TermAndCostTy>(
             "TCPair",
             vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
