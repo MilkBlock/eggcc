@@ -6,9 +6,12 @@ mod context_of;
 mod context_prop;
 mod debug_helper;
 mod drop_at;
+#[path = "expr_size_native.rs"]
 mod expr_size;
 mod hackers_delight;
 mod interval_analysis;
+#[cfg(feature = "eggplant")]
+mod interval_bounds;
 mod ivt;
 mod loop_invariant;
 mod loop_simplify;
@@ -97,26 +100,23 @@ pub(crate) fn native_execution_prologue() -> String {
         purity_analysis::fragment(),
         add_context::fragment(),
         context_prop::fragment(),
-        term_subst::fragment(),
+        term_subst::native_fragment(),
         context_of::fragment(),
-        subst::fragment(),
-        canonicalize::fragment(),
-        expr_size::fragment(),
-        drop_at::fragment(),
-        interval_analysis::fragment(),
-        mem_simple::fragment(),
-        loop_invariant::rules(),
+        subst::native_fragment(),
+        canonicalize::native_fragment(),
+        expr_size::native_fragment(),
+        drop_at::native_fragment(),
+        interval_analysis::native_fragment(),
+        mem_simple::native_fragment(),
+        loop_invariant::native_fragment(),
         loop_simplify::fragment(),
-        loop_unroll::fragment(),
-        swap_if::fragment(),
-        rec_to_loop::fragment(),
-        passthrough::fragment(),
-        loop_strength_reduction::fragment(),
-        ivt::fragment(),
-        conditional_invariant_code_motion::fragment(),
-        conditional_push_in::fragment(),
-        hackers_delight::fragment(),
-        non_weakly_linear::fragment(),
+        loop_unroll::native_fragment(),
+        rec_to_loop::native_fragment(),
+        passthrough::state_edge_fragment(),
+        loop_strength_reduction::native_fragment(),
+        ivt::native_fragment(),
+        conditional_invariant_code_motion::native_fragment(),
+        hackers_delight::native_fragment(),
         crate::schedule::rulesets(),
     ]
     .join("\n")
@@ -125,6 +125,12 @@ pub(crate) fn native_execution_prologue() -> String {
 #[cfg(feature = "eggplant")]
 pub(crate) fn register_native_rules(ablate: Option<&str>) {
     let _ = switch_rewrites::native::ensure_always_native_ruleset();
+    if ablate != Some("term-subst") {
+        let _ = term_subst::native::register_native_rules();
+    }
+    if ablate != Some("subst") {
+        let _ = subst::native::register_native_rules();
+    }
     if ablate != Some("peepholes") {
         let _ = peepholes::native::register_native_rules("peepholes");
     }
@@ -133,6 +139,58 @@ pub(crate) fn register_native_rules(ablate: Option<&str>) {
     }
     if ablate != Some("select_opt") {
         let _ = select::native::register_native_rules();
+    }
+    if ablate != Some("passthrough") {
+        let _ = passthrough::native::register_native_rules();
+    }
+    if ablate != Some("swap-if") {
+        let _ = swap_if::native::register_native_rules();
+    }
+    if ablate != Some("loop-strength-reduction") {
+        let _ = loop_strength_reduction::native::register_native_rules();
+    }
+    if ablate != Some("rec-to-loop") {
+        let _ = rec_to_loop::native::register_native_rules();
+    }
+    if ablate != Some("loop-unroll") {
+        let _ = loop_unroll::native::register_native_rules();
+    }
+    if ablate != Some("hacker") {
+        let _ = hackers_delight::native::register_native_rules();
+    }
+    if ablate != Some("push-in") {
+        let _ = conditional_push_in::native::register_native_rules();
+    }
+    if ablate != Some("non-weakly-linear") {
+        let _ = non_weakly_linear::native::register_native_rules();
+    }
+    if ablate != Some("canon") {
+        let _ = canonicalize::native::register_native_rules();
+    }
+    if ablate != Some("drop-at") {
+        let _ = drop_at::native::register_native_rules();
+    }
+    if ablate != Some("interval-analysis") {
+        let _ = interval_analysis::native::register_native_rules();
+    }
+    if ablate != Some("expr-size") {
+        let _ = expr_size::native::register_native_support_rules();
+    }
+    if ablate != Some("mem-simple") {
+        let _ = mem_simple::native::register_native_rules();
+    }
+    if ablate != Some("cicm") {
+        let _ = conditional_invariant_code_motion::native::register_native_rules();
+    }
+    if ablate != Some("ivt-analysis") {
+        let _ = ivt::native::register_native_support_rules();
+    }
+    if ablate != Some("loop-inversion") {
+        let _ = ivt::native::register_native_rules();
+    }
+    let _ = loop_invariant::native::register_native_support_rules();
+    if ablate != Some("loop-inv-motion") {
+        let _ = loop_invariant::native::register_native_rules();
     }
 }
 
@@ -1944,13 +2002,13 @@ mod tests {
             "(ruleset interval-analysis)",
             "(ruleset interval-rewrite)",
             "(datatype Bound",
-            "(function lo-bound (Expr) Bound :merge (bound-max old new))",
-            "(function hi-bound (Expr) Bound :merge (bound-min old new))",
+            "(function lo_bound (Expr) Bound :merge (bound_max old new))",
+            "(function hi_bound (Expr) Bound :merge (bound_min old new))",
             "(union expr (Const (Int x) ty ctx))",
-            "(set (lo-bound lhs) (IntB (+ la lb)))",
-            "(set (hi-bound lhs) (BoolB (bool-< la hb)))",
+            "(set (lo_bound lhs) (IntB (+ la lb)))",
+            "(set (hi_bound lhs) (BoolB (bool-< la hb)))",
             "(union lhs (Subst if_ctx inputs thn))",
-            "(set (lo-bound (Get ctx i)) lo)",
+            "(set (lo_bound (Get ctx i)) lo)",
         ] {
             assert!(
                 generated_prefix.contains(declaration),

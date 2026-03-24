@@ -6,6 +6,18 @@ pub(crate) fn fragment() -> String {
     out
 }
 
+#[cfg(feature = "eggplant")]
+pub(crate) fn native_fragment() -> String {
+    let (support_only, _) = MEM_SIMPLE
+        .split_once("\n; A write then a load to different addresses can be swapped\n")
+        .expect("mem_simple::native_fragment() expects the generated optimization marker");
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(support_only);
+    out.push('\n');
+    out
+}
+
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/mem_simple.rs)\n";
 const MEM_SIMPLE: &str = r#"
@@ -28,41 +40,41 @@ const MEM_SIMPLE: &str = r#"
       :ruleset mem-simple)
 
 (rule ((Bop (PtrAdd) e i)
-       (= (lo-bound i) (IntB lo))
+       (= (lo_bound i) (IntB lo))
        (> lo 0))
       ((NoAlias e (Bop (PtrAdd) e i)))
       :ruleset mem-simple)
 
 (rule ((Bop (PtrAdd) e i)
-       (= (hi-bound i) (IntB hi))
+       (= (hi_bound i) (IntB hi))
        (< hi 0))
       ((NoAlias e (Bop (PtrAdd) e i)))
       :ruleset mem-simple)
 
 (rule ((= p1 (Bop (PtrAdd) p i))
        (= p2 (Bop (PtrAdd) p (Bop (Add) i diff)))
-       (= (lo-bound diff) (IntB lo))
+       (= (lo_bound diff) (IntB lo))
        (> lo 0))
       ((NoAlias p1 p2))
       :ruleset mem-simple)
 
 (rule ((= p1 (Bop (PtrAdd) p i))
        (= p2 (Bop (PtrAdd) p (Bop (Add) i diff)))
-       (= (hi-bound diff) (IntB hi))
+       (= (hi_bound diff) (IntB hi))
        (< hi 0))
       ((NoAlias p1 p2))
       :ruleset mem-simple)
 
 (rule ((= p1 (Bop (PtrAdd) p i))
        (= p2 (Bop (PtrAdd) p (Bop (Sub) i diff)))
-       (= (lo-bound diff) (IntB lo))
+       (= (lo_bound diff) (IntB lo))
        (> lo 0))
       ((NoAlias p1 p2))
       :ruleset mem-simple)
 
 (rule ((= p1 (Bop (PtrAdd) p i))
        (= p2 (Bop (PtrAdd) p (Bop (Sub) i diff)))
-       (= (hi-bound diff) (IntB hi))
+       (= (hi_bound diff) (IntB hi))
        (< hi 0))
       ((NoAlias p1 p2))
       :ruleset mem-simple)
@@ -145,3 +157,332 @@ const MEM_SIMPLE: &str = r#"
 ; (rule ((DidMemOptimization _))
 ;       ((panic "DidMemOptimization"))
 ;       :ruleset mem-simple)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::{insert_call, Inserted};
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_fact, Insertable, IntoHandleTy, PatRecSgl, RuleRunnerSgl, RuleSetId,
+    };
+
+    fn insert_get(
+        ctx: &eggplant::wrap::RuleCtx,
+        expr: eggplant::egglog::Value,
+        index: eggplant::egglog::Value,
+    ) -> Inserted<schema_dsl::Expr> {
+        insert_call::<schema_dsl::Expr>(ctx, "Get", &[expr, index])
+    }
+
+    fn insert_load(
+        ctx: &eggplant::wrap::RuleCtx,
+        addr: eggplant::egglog::Value,
+        state: eggplant::egglog::Value,
+    ) -> Inserted<schema_dsl::Expr> {
+        let load_op = insert_call::<schema_dsl::BinaryOp>(ctx, "Load", &[]);
+        insert_call::<schema_dsl::Expr>(ctx, "Bop", &[load_op.0.val, addr, state])
+    }
+
+    fn insert_write(
+        ctx: &eggplant::wrap::RuleCtx,
+        addr: eggplant::egglog::Value,
+        value: eggplant::egglog::Value,
+        state: eggplant::egglog::Value,
+    ) -> Inserted<schema_dsl::Expr> {
+        let write_op = insert_call::<schema_dsl::TernaryOp>(ctx, "Write", &[]);
+        insert_call::<schema_dsl::Expr>(ctx, "Top", &[write_op.0.val, addr, value, state])
+    }
+
+    #[eggplant::pat_vars]
+    struct CommuteWriteLoadPat<PR: PatRecSgl> {
+        write_addr: schema_dsl::Expr,
+        load_addr: schema_dsl::Expr,
+        write_val: schema_dsl::Expr,
+        state: schema_dsl::Expr,
+        write: schema_dsl::Top,
+        load: schema_dsl::Bop,
+    }
+
+    fn commute_write_load_pat<PR: PatRecSgl>() -> CommuteWriteLoadPat<PR> {
+        let write_addr = schema_dsl::Expr::query_leaf();
+        let load_addr = schema_dsl::Expr::query_leaf();
+        let write_val = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let write =
+            schema_dsl::Top::query(&schema_dsl::Write::query(), &write_addr, &write_val, &state);
+        let load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &load_addr, &write);
+        let no_alias = prim_fact(
+            "NoAlias",
+            vec![
+                write_addr.handle().into_handle_ty(),
+                load_addr.handle().into_handle_ty(),
+            ],
+        );
+
+        CommuteWriteLoadPat::new(write_addr, load_addr, write_val, state, write, load)
+            .assert(no_alias)
+    }
+
+    #[eggplant::pat_vars]
+    struct DuplicateLoadPat<PR: PatRecSgl> {
+        first_load: schema_dsl::Bop,
+        second_load: schema_dsl::Bop,
+    }
+
+    fn duplicate_load_pat<PR: PatRecSgl>() -> DuplicateLoadPat<PR> {
+        let addr = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let first_load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &addr, &state);
+        let second_load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &addr, &first_load);
+
+        DuplicateLoadPat::new(first_load, second_load)
+    }
+
+    #[eggplant::pat_vars]
+    struct StoreForwardPat<PR: PatRecSgl> {
+        write_val: schema_dsl::Expr,
+        write: schema_dsl::Top,
+        load: schema_dsl::Bop,
+    }
+
+    fn store_forward_pat<PR: PatRecSgl>() -> StoreForwardPat<PR> {
+        let addr = schema_dsl::Expr::query_leaf();
+        let write_val = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let write = schema_dsl::Top::query(&schema_dsl::Write::query(), &addr, &write_val, &state);
+        let load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &addr, &write);
+
+        StoreForwardPat::new(write_val, write, load)
+    }
+
+    #[eggplant::pat_vars]
+    struct DuplicateWritePat<PR: PatRecSgl> {
+        first_write: schema_dsl::Top,
+        second_write: schema_dsl::Top,
+    }
+
+    fn duplicate_write_pat<PR: PatRecSgl>() -> DuplicateWritePat<PR> {
+        let addr = schema_dsl::Expr::query_leaf();
+        let write_val = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let first_write =
+            schema_dsl::Top::query(&schema_dsl::Write::query(), &addr, &write_val, &state);
+        let second_write =
+            schema_dsl::Top::query(&schema_dsl::Write::query(), &addr, &write_val, &first_write);
+
+        DuplicateWritePat::new(first_write, second_write)
+    }
+
+    #[eggplant::pat_vars]
+    struct ShadowedWritePat<PR: PatRecSgl> {
+        addr: schema_dsl::Expr,
+        write_val: schema_dsl::Expr,
+        state: schema_dsl::Expr,
+        second_write: schema_dsl::Top,
+    }
+
+    fn shadowed_write_pat<PR: PatRecSgl>() -> ShadowedWritePat<PR> {
+        let addr = schema_dsl::Expr::query_leaf();
+        let shadowed_val = schema_dsl::Expr::query_leaf();
+        let write_val = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let first_write =
+            schema_dsl::Top::query(&schema_dsl::Write::query(), &addr, &shadowed_val, &state);
+        let second_write =
+            schema_dsl::Top::query(&schema_dsl::Write::query(), &addr, &write_val, &first_write);
+
+        ShadowedWritePat::new(addr, write_val, state, second_write)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = RuleSetId("mem-simple");
+
+        PeepholeTx::add_rule(
+            "mem_simple_commute_write_then_load",
+            ruleset,
+            commute_write_load_pat,
+            |ctx, pat| {
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let one = ctx._intern_base::<i64, i64>(1);
+                let new_load = insert_load(
+                    &ctx.ctx,
+                    pat.load_addr.to_value(&ctx.ctx).val,
+                    pat.state.to_value(&ctx.ctx).val,
+                );
+                let new_load_state = insert_get(&ctx.ctx, new_load.0.val, one);
+                let new_write = insert_write(
+                    &ctx.ctx,
+                    pat.write_addr.to_value(&ctx.ctx).val,
+                    pat.write_val.to_value(&ctx.ctx).val,
+                    new_load_state.0.val,
+                );
+                let load_state = insert_get(&ctx.ctx, pat.load.to_value(&ctx.ctx).val, one);
+                let load_value = insert_get(&ctx.ctx, pat.load.to_value(&ctx.ctx).val, zero);
+                let new_load_value = insert_get(&ctx.ctx, new_load.0.val, zero);
+
+                ctx.union(load_state, new_write);
+                ctx.union(load_value, new_load_value);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "mem_simple_duplicate_load",
+            ruleset,
+            duplicate_load_pat,
+            |ctx, pat| {
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let one = ctx._intern_base::<i64, i64>(1);
+                let first_value = insert_get(&ctx.ctx, pat.first_load.to_value(&ctx.ctx).val, zero);
+                let second_value =
+                    insert_get(&ctx.ctx, pat.second_load.to_value(&ctx.ctx).val, zero);
+                let first_state = insert_get(&ctx.ctx, pat.first_load.to_value(&ctx.ctx).val, one);
+                let second_state =
+                    insert_get(&ctx.ctx, pat.second_load.to_value(&ctx.ctx).val, one);
+
+                ctx.union(first_value, second_value);
+                ctx.union(first_state, second_state);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "mem_simple_store_forward",
+            ruleset,
+            store_forward_pat,
+            |ctx, pat| {
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let one = ctx._intern_base::<i64, i64>(1);
+                let load_value = insert_get(&ctx.ctx, pat.load.to_value(&ctx.ctx).val, zero);
+                let load_state = insert_get(&ctx.ctx, pat.load.to_value(&ctx.ctx).val, one);
+
+                ctx.union(load_value, pat.write_val);
+                ctx.union(load_state, pat.write);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "mem_simple_duplicate_write",
+            ruleset,
+            duplicate_write_pat,
+            |ctx, pat| {
+                ctx.union(pat.first_write, pat.second_write);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "mem_simple_shadowed_write",
+            ruleset,
+            shadowed_write_pat,
+            |ctx, pat| {
+                let rewritten = insert_write(
+                    &ctx.ctx,
+                    pat.addr.to_value(&ctx.ctx).val,
+                    pat.write_val.to_value(&ctx.ctx).val,
+                    pat.state.to_value(&ctx.ctx).val,
+                );
+
+                ctx.union(pat.second_write, rewritten);
+            },
+        );
+
+        ruleset
+    }
+}
+
+#[cfg(all(test, feature = "eggplant"))]
+mod native_tests {
+    use crate::ast::*;
+    use crate::eggplant_backend::test_lock;
+    use crate::schema::{BaseType, Type};
+
+    fn candidate_parts() -> (String, String, String) {
+        let one = int_ty(1, Type::Base(BaseType::IntT));
+        let two = int(2).with_arg_types(tuplet!(statet()), Type::Base(intt()));
+        let orig_state = get(arg_ty(tuplet!(statet())), 0);
+        let ptr_and_state = alloc(0, one, orig_state.clone(), pointert(intt()));
+        let ptr = get(ptr_and_state.clone(), 0);
+        let state = get(ptr_and_state, 1);
+        let write_expr = write(ptr.clone(), two.clone(), state);
+        (
+            load(ptr, write_expr.clone()).to_string(),
+            two.to_string(),
+            write_expr.to_string(),
+        )
+    }
+
+    fn mem_simple_schedule() -> String {
+        "(run-schedule mem-simple)".to_string()
+    }
+
+    fn text_store_forward_holds(
+        prologue: &str,
+        expr: &str,
+        schedule: &str,
+        expected_value: &str,
+        expected_state: &str,
+    ) {
+        let program = format!(
+            "{prologue}\n(let __rlcr_load {expr})\n{schedule}\n(check (= (Get __rlcr_load 0) {expected_value}))\n(check (= (Get __rlcr_load 1) {expected_state}))\n"
+        );
+        let mut egraph = egglog::EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+    }
+
+    fn native_store_forward_holds(
+        prologue: &str,
+        expr: &str,
+        schedule: &str,
+        ablate: Option<&str>,
+        expected_value: &str,
+        expected_state: &str,
+    ) -> std::result::Result<(), eggplant::egglog::Error> {
+        let initialization = format!("(let __rlcr_load {expr})");
+        crate::with_native_rules_egraph(prologue, &initialization, schedule, ablate, |egraph| {
+            egraph.parse_and_run_program(
+                None,
+                &format!(
+                    "(check (= (Get __rlcr_load 0) {expected_value}))\n(check (= (Get __rlcr_load 1) {expected_state}))"
+                ),
+            )?;
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn native_feature_path_matches_text_backend_for_mem_simple_case() {
+        let _guard = test_lock::lock();
+        let (expr, expected_value, expected_state) = candidate_parts();
+        let schedule = mem_simple_schedule();
+
+        text_store_forward_holds(
+            &crate::prologue_egglog_text(),
+            &expr,
+            &schedule,
+            &expected_value,
+            &expected_state,
+        );
+        native_store_forward_holds(
+            &crate::feature_execution_prologue(true, None),
+            &expr,
+            &schedule,
+            None,
+            &expected_value,
+            &expected_state,
+        )
+        .unwrap();
+
+        let ablated = native_store_forward_holds(
+            &crate::feature_execution_prologue(true, Some("mem-simple")),
+            &expr,
+            &crate::ablate_schedule(&schedule, "mem-simple"),
+            Some("mem-simple"),
+            &expected_value,
+            &expected_state,
+        );
+
+        assert!(
+            ablated.is_err(),
+            "ablating mem-simple should make the store-forward witness fail",
+        );
+    }
+}

@@ -78,3 +78,332 @@ const NON_WEAKLY_LINEAR: &str = r#"(ruleset non-weakly-linear)
   (set (LoopNumItersGuess new-loop-input new-loop-body) (- old_cost 1))
   )
  :ruleset non-weakly-linear)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::insert_call;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+    };
+
+    #[eggplant::pat_vars]
+    struct IfConstPat<PR: PatRecSgl> {
+        if_e: schema_dsl::If,
+        ctx: schema_dsl::Assumption,
+        inputs: schema_dsl::Expr,
+        branch: schema_dsl::Expr,
+        pred_ty: schema_dsl::Type,
+    }
+
+    fn if_const_pat<PR: PatRecSgl>(pred_value: bool) -> IfConstPat<PR> {
+        let pred_ty = schema_dsl::Type::query_leaf();
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let pred_bool = schema_dsl::Bool::query();
+        let pred_matches_value = pred_bool.handle_value().eq(&pred_value);
+        let pred = schema_dsl::Const::query(&pred_bool, &pred_ty, &ctx);
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let branch = if pred_value { thn } else { els };
+
+        IfConstPat::new(if_e, ctx, inputs, branch, pred_ty).assert(pred_matches_value)
+    }
+
+    #[eggplant::pat_vars]
+    struct LoadStatePat<PR: PatRecSgl> {
+        state: schema_dsl::Expr,
+        load_out: schema_dsl::Get,
+    }
+
+    fn load_state_pat<PR: PatRecSgl>() -> LoadStatePat<PR> {
+        let load_addr = schema_dsl::Expr::query_leaf();
+        let state = schema_dsl::Expr::query_leaf();
+        let load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &load_addr, &state);
+        let load_out = schema_dsl::Get::query(&load);
+        let output_is_state = load_out.handle_index().eq(&(&1_i64).as_handle());
+
+        LoadStatePat::new(state, load_out).assert(output_is_state)
+    }
+
+    #[eggplant::pat_vars]
+    struct IfPassthroughPat<PR: PatRecSgl> {
+        inputs: schema_dsl::Expr,
+        then_arg_out: schema_dsl::Get,
+        lhs: schema_dsl::Get,
+        arg_ty: schema_dsl::Type,
+    }
+
+    fn if_passthrough_pat<PR: PatRecSgl>() -> IfPassthroughPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+        let lhs = schema_dsl::Get::query(&if_expr);
+        let then_branch = schema_dsl::Get::query(&then_);
+        let else_branch = schema_dsl::Get::query(&else_);
+        let arg_ty = schema_dsl::Type::query_leaf();
+        let then_ctx = schema_dsl::Assumption::query_leaf();
+        let else_ctx = schema_dsl::Assumption::query_leaf();
+        let then_arg = schema_dsl::Arg::query(&arg_ty, &then_ctx);
+        let else_arg = schema_dsl::Arg::query(&arg_ty, &else_ctx);
+        let then_arg_out = schema_dsl::Get::query(&then_arg);
+        let else_arg_out = schema_dsl::Get::query(&else_arg);
+
+        let same_then_index = then_branch.handle_index().eq(&lhs.handle_index());
+        let same_else_index = else_branch.handle_index().eq(&lhs.handle_index());
+        let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
+        let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
+        let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
+
+        IfPassthroughPat::new(inputs, then_arg_out, lhs, arg_ty)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(same_arg_index)
+            .assert(same_then_value)
+            .assert(same_else_value)
+    }
+
+    #[eggplant::pat_vars]
+    struct LoopPeelPat<PR: PatRecSgl> {
+        lhs: schema_dsl::DoWhile,
+        inputs: schema_dsl::Expr,
+        outputs: schema_dsl::Expr,
+        ctx: schema_dsl::Assumption,
+        inputs_ty: schema_dsl::Type,
+    }
+
+    fn loop_peel_pat<PR: PatRecSgl>() -> LoopPeelPat<PR> {
+        let inputs = schema_dsl::Expr::query_leaf();
+        let outputs = schema_dsl::Expr::query_leaf();
+        let lhs = schema_dsl::DoWhile::query(&inputs, &outputs);
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let inputs_ty = schema_dsl::Type::query_leaf();
+
+        let loop_context = prim_fact(
+            "ContextOf",
+            vec![lhs.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
+        );
+        let inputs_have_type = prim_fact(
+            "HasType",
+            vec![
+                inputs.handle().into_handle_ty(),
+                inputs_ty.handle().into_handle_ty(),
+            ],
+        );
+
+        LoopPeelPat::new(lhs, inputs, outputs, ctx, inputs_ty)
+            .assert(loop_context)
+            .assert(inputs_have_type)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = PeepholeTx::new_ruleset("non-weakly-linear");
+
+        PeepholeTx::add_rule(
+            "non_weakly_linear_if_true",
+            ruleset,
+            || if_const_pat(true),
+            |ctx, pat| {
+                let rewritten = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        pat.ctx.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.branch.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pat.if_e, rewritten);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "non_weakly_linear_if_false",
+            ruleset,
+            || if_const_pat(false),
+            |ctx, pat| {
+                let rewritten = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        pat.ctx.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.branch.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pat.if_e, rewritten);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "non_weakly_linear_load_state",
+            ruleset,
+            load_state_pat,
+            |ctx, pat| {
+                ctx.union(pat.load_out, pat.state);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "non_weakly_linear_if_passthrough",
+            ruleset,
+            if_passthrough_pat,
+            |ctx, pat| {
+                let passthrough = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.then_arg_out.index.val,
+                    ],
+                );
+                ctx.union(pat.lhs, passthrough);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "non_weakly_linear_loop_peel_once",
+            ruleset,
+            loop_peel_pat,
+            |ctx, pat| {
+                let Some(old_cost_value) = ctx.lookup(
+                    "LoopNumItersGuess",
+                    &[
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.outputs.to_value(&ctx.ctx).val,
+                    ],
+                ) else {
+                    return;
+                };
+                let old_cost: i64 = ctx._devalue_base(old_cost_value);
+                if old_cost > 5 {
+                    return;
+                }
+
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let one = ctx._intern_base::<i64, i64>(1);
+                let outputs_len_value =
+                    ctx.lookup_expect("tuple-length", &[pat.outputs.to_value(&ctx.ctx).val]);
+                let outputs_len: i64 = ctx._devalue_base(outputs_len_value);
+                let outputs_body_len = ctx._intern_base::<i64, i64>(outputs_len - 1);
+
+                let executed_once = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        pat.ctx.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.outputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let executed_once_pred = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[executed_once.to_value(&ctx.ctx).val, zero],
+                );
+                let executed_once_body = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "SubTuple",
+                    &[executed_once.to_value(&ctx.ctx).val, one, outputs_body_len],
+                );
+                let then_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        true.to_value(&ctx.ctx).val,
+                        executed_once_pred.to_value(&ctx.ctx).val,
+                        executed_once_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let else_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        false.to_value(&ctx.ctx).val,
+                        executed_once_pred.to_value(&ctx.ctx).val,
+                        executed_once_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_loop_input = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        pat.inputs_ty.to_value(&ctx.ctx).val,
+                        then_ctx.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let tmp_ctx = insert_call::<schema_dsl::Assumption>(&ctx.ctx, "TmpCtx", &[]);
+                let tmp_arg = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        pat.inputs_ty.to_value(&ctx.ctx).val,
+                        tmp_ctx.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_loop_body = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        tmp_ctx.to_value(&ctx.ctx).val,
+                        tmp_arg.to_value(&ctx.ctx).val,
+                        pat.outputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let in_loop = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InLoop",
+                    &[
+                        new_loop_input.to_value(&ctx.ctx).val,
+                        new_loop_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(tmp_ctx, in_loop);
+
+                let else_arg = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        pat.inputs_ty.to_value(&ctx.ctx).val,
+                        else_ctx.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let peeled_loop = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "DoWhile",
+                    &[
+                        new_loop_input.to_value(&ctx.ctx).val,
+                        new_loop_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let peeled_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        executed_once_pred.to_value(&ctx.ctx).val,
+                        executed_once_body.to_value(&ctx.ctx).val,
+                        peeled_loop.to_value(&ctx.ctx).val,
+                        else_arg.to_value(&ctx.ctx).val,
+                    ],
+                );
+
+                ctx.union(pat.lhs, peeled_if);
+                ctx.insert_func_tbl(
+                    "LoopNumItersGuess",
+                    &[
+                        new_loop_input.to_value(&ctx.ctx).val,
+                        new_loop_body.to_value(&ctx.ctx).val,
+                        ctx._intern_base::<i64, i64>(old_cost - 1),
+                    ],
+                );
+                ctx.remove("TmpCtx", &[]);
+            },
+        );
+
+        ruleset
+    }
+}

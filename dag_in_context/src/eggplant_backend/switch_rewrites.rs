@@ -83,8 +83,8 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
        (= (Get thn k) (Get (Arg _ty (InIf true pred inputs)) i))
 
        (= els_out (Get els k))
-       (= (IntB y) (lo-bound els_out))
-       (= (IntB y) (hi-bound els_out))
+       (= (IntB y) (lo_bound els_out))
+       (= (IntB y) (hi_bound els_out))
        )
        (
        (union (Get if_e k) (Top (Select) pred a (Const (Int y) ty ctx)))
@@ -100,8 +100,8 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
        (HasArgType if_e ty)
 
        (= thn_out (Get thn k))
-       (= (IntB y) (lo-bound thn_out))
-       (= (IntB y) (hi-bound thn_out))
+       (= (IntB y) (lo_bound thn_out))
+       (= (IntB y) (hi_bound thn_out))
 
        ; input to the if
        (= b (Get inputs i))
@@ -166,300 +166,556 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
     // Required by the `#[eggplant::dsl]` expansion below.
-    use eggplant::dashmap;
-    // Required by the `#[eggplant::dsl]` expansion below.
-    use eggplant::egglog;
-    use super::super::native_rule_helpers::{
-        bool_expr, call_expr, i64_expr, insert_call, node_expr, var_expr, EqCallConstraint,
-        FactConstraint,
-    };
+    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
-    use crate::eggplant_backend::peepholes::native::{PeepholePatRec, PeepholeTx};
-    use eggplant::prelude::{Insertable, PatRecSgl, RuleRunnerSgl, RuleSetId};
-
-    // The DSL macro generates the `IntB` query type used below.
-    #[allow(dead_code)]
-    #[eggplant::dsl]
-    enum Bound {
-        IntB { value: i64 },
-        UnknownB {},
-    }
+    use crate::eggplant_backend::interval_bounds::{hi_bound, lo_bound, IntB};
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_call, prim_fact, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
+    };
 
     pub(crate) fn ensure_always_native_ruleset() -> RuleSetId {
         PeepholeTx::new_ruleset("always-switch-rewrite")
     }
 
+    #[eggplant::pat_vars]
+    struct SwitchMinPat<PR: PatRecSgl> {
+        a: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        if_out: schema_dsl::Expr,
+        ty: schema_dsl::Type,
+    }
+
+    fn switch_min_pat<PR: PatRecSgl>() -> SwitchMinPat<PR> {
+        let a = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let pred = schema_dsl::Bop::query(&schema_dsl::LessThan::query(), &a, &b);
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let a_get = schema_dsl::Get::query(&inputs);
+        let b_get = schema_dsl::Get::query(&inputs);
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let ty = schema_dsl::Type::query_leaf();
+        let thn_ctx = schema_dsl::Assumption::query_leaf();
+        let els_ctx = schema_dsl::Assumption::query_leaf();
+        let thn_arg = schema_dsl::Arg::query(&ty, &thn_ctx);
+        let els_arg = schema_dsl::Arg::query(&ty, &els_ctx);
+        let thn_arg_out = schema_dsl::Get::query(&thn_arg);
+        let els_arg_out = schema_dsl::Get::query(&els_arg);
+        let if_out_handle = if_out.handle();
+        let a_handle = a.handle();
+        let b_handle = b.handle();
+        let true_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+        let false_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+
+        SwitchMinPat::new(a, b, if_out, ty)
+            .assert(if_out_handle.eq(&if_out_get.handle()))
+            .assert(a_handle.eq(&a_get.handle()))
+            .assert(b_handle.eq(&b_get.handle()))
+            .assert(if_out_get.handle_index().eq(&thn_out.handle_index()))
+            .assert(if_out_get.handle_index().eq(&els_out.handle_index()))
+            .assert(thn_ctx.handle().eq(&true_ctx))
+            .assert(els_ctx.handle().eq(&false_ctx))
+            .assert(thn_out.handle().eq(&thn_arg_out.handle()))
+            .assert(els_out.handle().eq(&els_arg_out.handle()))
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchMaxPat<PR: PatRecSgl> {
+        a: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        if_out: schema_dsl::Expr,
+        ty: schema_dsl::Type,
+    }
+
+    fn switch_max_pat<PR: PatRecSgl>() -> SwitchMaxPat<PR> {
+        let a = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let pred = schema_dsl::Bop::query(&schema_dsl::LessThan::query(), &a, &b);
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let a_get = schema_dsl::Get::query(&inputs);
+        let b_get = schema_dsl::Get::query(&inputs);
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let ty = schema_dsl::Type::query_leaf();
+        let thn_ctx = schema_dsl::Assumption::query_leaf();
+        let els_ctx = schema_dsl::Assumption::query_leaf();
+        let thn_arg = schema_dsl::Arg::query(&ty, &thn_ctx);
+        let els_arg = schema_dsl::Arg::query(&ty, &els_ctx);
+        let thn_arg_out = schema_dsl::Get::query(&thn_arg);
+        let els_arg_out = schema_dsl::Get::query(&els_arg);
+        let if_out_handle = if_out.handle();
+        let a_handle = a.handle();
+        let b_handle = b.handle();
+        let true_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+        let false_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+
+        SwitchMaxPat::new(a, b, if_out, ty)
+            .assert(if_out_handle.eq(&if_out_get.handle()))
+            .assert(a_handle.eq(&a_get.handle()))
+            .assert(b_handle.eq(&b_get.handle()))
+            .assert(if_out_get.handle_index().eq(&thn_out.handle_index()))
+            .assert(if_out_get.handle_index().eq(&els_out.handle_index()))
+            .assert(thn_ctx.handle().eq(&true_ctx))
+            .assert(els_ctx.handle().eq(&false_ctx))
+            .assert(thn_out.handle_index().eq(&b_get.handle_index()))
+            .assert(els_out.handle_index().eq(&a_get.handle_index()))
+            .assert(thn_out.handle().eq(&thn_arg_out.handle()))
+            .assert(els_out.handle().eq(&els_arg_out.handle()))
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchSelectPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        a: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        if_out: schema_dsl::Expr,
+        ty: schema_dsl::Type,
+    }
+
+    fn switch_select_pat<PR: PatRecSgl>() -> SwitchSelectPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let a = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let a_get = schema_dsl::Get::query(&inputs);
+        let b_get = schema_dsl::Get::query(&inputs);
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let ty = schema_dsl::Type::query_leaf();
+        let thn_ctx = schema_dsl::Assumption::query_leaf();
+        let els_ctx = schema_dsl::Assumption::query_leaf();
+        let thn_arg = schema_dsl::Arg::query(&ty, &thn_ctx);
+        let els_arg = schema_dsl::Arg::query(&ty, &els_ctx);
+        let thn_arg_out = schema_dsl::Get::query(&thn_arg);
+        let els_arg_out = schema_dsl::Get::query(&els_arg);
+        let if_out_handle = if_out.handle();
+        let a_handle = a.handle();
+        let b_handle = b.handle();
+        let true_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+        let false_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        );
+
+        SwitchSelectPat::new(pred, a, b, if_out, ty)
+            .assert(if_out_handle.eq(&if_out_get.handle()))
+            .assert(a_handle.eq(&a_get.handle()))
+            .assert(b_handle.eq(&b_get.handle()))
+            .assert(if_out_get.handle_index().eq(&thn_out.handle_index()))
+            .assert(if_out_get.handle_index().eq(&els_out.handle_index()))
+            .assert(thn_ctx.handle().eq(&true_ctx))
+            .assert(els_ctx.handle().eq(&false_ctx))
+            .assert(thn_out.handle().eq(&thn_arg_out.handle()))
+            .assert(els_out.handle().eq(&els_arg_out.handle()))
+            .assert(a_get.handle_index().ne(&b_get.handle_index()))
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchSelectConstPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        ctx: schema_dsl::Assumption,
+        ty: schema_dsl::Type,
+        x: schema_dsl::Constant,
+        y: schema_dsl::Constant,
+        if_out: schema_dsl::Expr,
+    }
+
+    fn switch_select_const_pat<PR: PatRecSgl>() -> SwitchSelectConstPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let ty = schema_dsl::Type::query_leaf();
+        let x = schema_dsl::Constant::query_leaf();
+        let y = schema_dsl::Constant::query_leaf();
+        let branch_ty = schema_dsl::Type::query_leaf();
+        let thn_ctx = schema_dsl::Assumption::query_leaf();
+        let els_ctx = schema_dsl::Assumption::query_leaf();
+        let thn_const = schema_dsl::Const::query(&x, &branch_ty, &thn_ctx);
+        let els_const = schema_dsl::Const::query(&y, &branch_ty, &els_ctx);
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+
+        let ctx_of_if = prim_fact(
+            "ContextOf",
+            vec![
+                if_e.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        );
+        let has_arg_ty = prim_fact(
+            "HasArgType",
+            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        );
+        let if_out_matches = if_out.handle().eq(&if_out_get.handle());
+        let thn_const_matches = thn_const.handle().eq(&thn_out.handle());
+        let els_const_matches = els_const.handle().eq(&els_out.handle());
+        let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
+        let same_els_index = if_out_get.handle_index().eq(&els_out.handle_index());
+        let thn_ctx_matches = thn_ctx.handle().eq(&prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        ));
+        let els_ctx_matches = els_ctx.handle().eq(&prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        ));
+
+        SwitchSelectConstPat::new(pred, ctx, ty, x, y, if_out)
+            .assert(ctx_of_if)
+            .assert(has_arg_ty)
+            .assert(if_out_matches)
+            .assert(thn_const_matches)
+            .assert(els_const_matches)
+            .assert(same_thn_index)
+            .assert(same_els_index)
+            .assert(thn_ctx_matches)
+            .assert(els_ctx_matches)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchSelectElseConstPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        a: schema_dsl::Expr,
+        ctx: schema_dsl::Assumption,
+        ty: schema_dsl::Type,
+        thn_ctx: schema_dsl::Assumption,
+        y: IntB,
+        if_out: schema_dsl::Expr,
+    }
+
+    fn switch_select_else_const_pat<PR: PatRecSgl>() -> SwitchSelectElseConstPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let a = schema_dsl::Expr::query_leaf();
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let ty = schema_dsl::Type::query_leaf();
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let thn_ctx = schema_dsl::Assumption::query_leaf();
+        let branch_ty = schema_dsl::Type::query_leaf();
+        let y = IntB::query();
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let a_get = schema_dsl::Get::query(&inputs);
+        let thn_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &thn_ctx));
+        let ctx_of_if = prim_fact(
+            "ContextOf",
+            vec![
+                if_e.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        );
+        let has_arg_ty = prim_fact(
+            "HasArgType",
+            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        );
+        let if_out_matches = if_out.handle().eq(&if_out_get.handle());
+        let a_matches = a.handle().eq(&a_get.handle());
+        let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
+        let same_els_index = if_out_get.handle_index().eq(&els_out.handle_index());
+        let same_arg_index = a_get.handle_index().eq(&thn_arg_out.handle_index());
+        let thn_ctx_matches = thn_ctx.handle().eq(&prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        ));
+        let thn_matches_arg = thn_out.handle().eq(&thn_arg_out.handle());
+        let lo_bound = lo_bound::query(&els_out).handle().eq(&y.handle());
+        let hi_bound = hi_bound::query(&els_out).handle().eq(&y.handle());
+
+        SwitchSelectElseConstPat::new(pred, a, ctx, ty, thn_ctx, y, if_out)
+            .assert(ctx_of_if)
+            .assert(has_arg_ty)
+            .assert(if_out_matches)
+            .assert(a_matches)
+            .assert(same_thn_index)
+            .assert(same_els_index)
+            .assert(same_arg_index)
+            .assert(thn_ctx_matches)
+            .assert(thn_matches_arg)
+            .assert(lo_bound)
+            .assert(hi_bound)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchSelectThenConstPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        ctx: schema_dsl::Assumption,
+        ty: schema_dsl::Type,
+        els_ctx: schema_dsl::Assumption,
+        y: IntB,
+        if_out: schema_dsl::Expr,
+    }
+
+    fn switch_select_then_const_pat<PR: PatRecSgl>() -> SwitchSelectThenConstPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let ty = schema_dsl::Type::query_leaf();
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let els_ctx = schema_dsl::Assumption::query_leaf();
+        let branch_ty = schema_dsl::Type::query_leaf();
+        let y = IntB::query();
+        let if_out_get = schema_dsl::Get::query(&if_e);
+        let b_get = schema_dsl::Get::query(&inputs);
+        let els_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &els_ctx));
+        let ctx_of_if = prim_fact(
+            "ContextOf",
+            vec![
+                if_e.handle().into_handle_ty(),
+                ctx.handle().into_handle_ty(),
+            ],
+        );
+        let has_arg_ty = prim_fact(
+            "HasArgType",
+            vec![if_e.handle().into_handle_ty(), ty.handle().into_handle_ty()],
+        );
+        let if_out_matches = if_out.handle().eq(&if_out_get.handle());
+        let b_matches = b.handle().eq(&b_get.handle());
+        let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
+        let same_els_index = if_out_get.handle_index().eq(&els_out.handle_index());
+        let same_arg_index = b_get.handle_index().eq(&els_arg_out.handle_index());
+        let lo_bound = lo_bound::query(&thn_out).handle().eq(&y.handle());
+        let hi_bound = hi_bound::query(&thn_out).handle().eq(&y.handle());
+        let els_ctx_matches = els_ctx.handle().eq(&prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                inputs.handle().into_handle_ty(),
+            ],
+        ));
+        let els_matches_arg = els_out.handle().eq(&els_arg_out.handle());
+
+        SwitchSelectThenConstPat::new(pred, b, ctx, ty, els_ctx, y, if_out)
+            .assert(ctx_of_if)
+            .assert(has_arg_ty)
+            .assert(if_out_matches)
+            .assert(b_matches)
+            .assert(same_thn_index)
+            .assert(same_els_index)
+            .assert(same_arg_index)
+            .assert(lo_bound)
+            .assert(hi_bound)
+            .assert(els_ctx_matches)
+            .assert(els_matches_arg)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchAndPat<PR: PatRecSgl> {
+        lhs: schema_dsl::If,
+        a: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        ins: schema_dsl::Expr,
+        x: schema_dsl::Expr,
+        y: schema_dsl::Expr,
+        ins_ty: schema_dsl::TypeList,
+    }
+
+    fn switch_and_pat<PR: PatRecSgl>() -> SwitchAndPat<PR> {
+        let a = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let ins = schema_dsl::Expr::query_leaf();
+        let x = schema_dsl::Expr::query_leaf();
+        let y = schema_dsl::Expr::query_leaf();
+        let lhs = schema_dsl::If::query(
+            &schema_dsl::Bop::query(&schema_dsl::And::query(), &a, &b),
+            &ins,
+            &x,
+            &y,
+        );
+        let ins_ty = schema_dsl::TypeList::query_leaf();
+        let switch_and_len = BaseVar::<i64, PR>::query_named("switch_and_len");
+
+        let ins_has_type = prim_fact(
+            "HasType",
+            vec![
+                ins.handle().into_handle_ty(),
+                schema_dsl::TupleT::query(&ins_ty).handle().into_handle_ty(),
+            ],
+        );
+        let tuple_len_known = switch_and_len
+            .handle()
+            .eq(&prim_call::<i64>("tuple-length", vec![ins.handle().into_handle_ty()]));
+        let rhs_small = prim_fact(
+            "<",
+            vec![
+                prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
+                (&100_i64).into_handle_ty(),
+            ],
+        );
+
+        SwitchAndPat::new(lhs, a, b, ins, x, y, ins_ty)
+            .assert(ins_has_type)
+            .assert(tuple_len_known)
+            .assert(rhs_small)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchOrPat<PR: PatRecSgl> {
+        lhs: schema_dsl::If,
+        a: schema_dsl::Expr,
+        b: schema_dsl::Expr,
+        ins: schema_dsl::Expr,
+        x: schema_dsl::Expr,
+        y: schema_dsl::Expr,
+        ins_ty: schema_dsl::TypeList,
+    }
+
+    fn switch_or_pat<PR: PatRecSgl>() -> SwitchOrPat<PR> {
+        let a = schema_dsl::Expr::query_leaf();
+        let b = schema_dsl::Expr::query_leaf();
+        let ins = schema_dsl::Expr::query_leaf();
+        let x = schema_dsl::Expr::query_leaf();
+        let y = schema_dsl::Expr::query_leaf();
+        let lhs = schema_dsl::If::query(
+            &schema_dsl::Bop::query(&schema_dsl::Or::query(), &a, &b),
+            &ins,
+            &x,
+            &y,
+        );
+        let ins_ty = schema_dsl::TypeList::query_leaf();
+        let switch_or_len = BaseVar::<i64, PR>::query_named("switch_or_len");
+
+        let ins_has_type = prim_fact(
+            "HasType",
+            vec![
+                ins.handle().into_handle_ty(),
+                schema_dsl::TupleT::query(&ins_ty).handle().into_handle_ty(),
+            ],
+        );
+        let tuple_len_known = switch_or_len
+            .handle()
+            .eq(&prim_call::<i64>("tuple-length", vec![ins.handle().into_handle_ty()]));
+        let lhs_small = prim_fact(
+            "<",
+            vec![
+                prim_call::<i64>("Expr-size", vec![x.handle().into_handle_ty()]).into_handle_ty(),
+                (&100_i64).into_handle_ty(),
+            ],
+        );
+        let rhs_small = prim_fact(
+            "<",
+            vec![
+                prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
+                (&100_i64).into_handle_ty(),
+            ],
+        );
+
+        SwitchOrPat::new(lhs, a, b, ins, x, y, ins_ty)
+            .assert(ins_has_type)
+            .assert(tuple_len_known)
+            .assert(lhs_small)
+            .assert(rhs_small)
+    }
+
     pub(crate) fn register_native_rules() -> RuleSetId {
         let ruleset = PeepholeTx::new_ruleset("switch_rewrite");
 
-        PeepholeTx::add_rule(
-            "switch_min",
-            ruleset,
-            || {
-                let a = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let pred = schema_dsl::Bop::query(&schema_dsl::LessThan::query(), &a, &b);
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let els_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
+        PeepholeTx::add_rule("switch_min", ruleset, switch_min_pat, |ctx, pat| {
+            let op = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Smin", &[]);
+            let rhs =
+                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Bop", &[op.0.val, pat.a.val, pat.b.val]);
+            ctx.union(pat.if_out, rhs);
+        });
 
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&a),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&b),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("j")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_ctx),
-                    "InIf",
-                    vec![bool_expr(true), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_ctx),
-                    "InIf",
-                    vec![bool_expr(false), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&thn_ctx)]),
-                        var_expr("i"),
-                    ],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&els_ctx)]),
-                        var_expr("j"),
-                    ],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchMinPat {
-                    a: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    if_out: schema_dsl::Expr,
-                }
-            },
-            |ctx, pat| {
-                let op = insert_call::<schema_dsl::BinaryOp>(ctx, "Smin", &[]);
-                let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
-                    "Bop",
-                    &[op.0.val, pat.a.val, pat.b.val],
-                );
-                ctx.union(pat.if_out, rhs);
-            },
-        );
-
-        PeepholeTx::add_rule(
-            "switch_max",
-            ruleset,
-            || {
-                let a = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let pred = schema_dsl::Bop::query(&schema_dsl::LessThan::query(), &a, &b);
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let els_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&a),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&b),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("j")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_ctx),
-                    "InIf",
-                    vec![bool_expr(true), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_ctx),
-                    "InIf",
-                    vec![bool_expr(false), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&thn_ctx)]),
-                        var_expr("j"),
-                    ],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&els_ctx)]),
-                        var_expr("i"),
-                    ],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchMaxPat {
-                    a: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    if_out: schema_dsl::Expr,
-                }
-            },
-            |ctx, pat| {
-                let op = insert_call::<schema_dsl::BinaryOp>(ctx, "Smax", &[]);
-                let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
-                    "Bop",
-                    &[op.0.val, pat.a.val, pat.b.val],
-                );
-                ctx.union(pat.if_out, rhs);
-            },
-        );
+        PeepholeTx::add_rule("switch_max", ruleset, switch_max_pat, |ctx, pat| {
+            let op = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Smax", &[]);
+            let rhs =
+                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Bop", &[op.0.val, pat.a.val, pat.b.val]);
+            ctx.union(pat.if_out, rhs);
+        });
 
         PeepholeTx::add_rule(
             "switch_select_from_if",
             ruleset,
-            || {
-                let pred = schema_dsl::Expr::query_leaf();
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let a = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let els_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&a),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&b),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("j")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_ctx),
-                    "InIf",
-                    vec![bool_expr(true), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_ctx),
-                    "InIf",
-                    vec![bool_expr(false), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&thn_ctx)]),
-                        var_expr("i"),
-                    ],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![node_expr(&ty), node_expr(&els_ctx)]),
-                        var_expr("j"),
-                    ],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "!=",
-                    vec![var_expr("i"), var_expr("j")],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchSelectPat {
-                    pred: schema_dsl::Expr,
-                    a: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    if_out: schema_dsl::Expr,
-                }
-            },
+            switch_select_pat,
             |ctx, pat| {
-                let op = insert_call::<schema_dsl::TernaryOp>(ctx, "Select", &[]);
+                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
                 let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Top",
                     &[op.0.val, pat.pred.val, pat.a.val, pat.b.val],
                 );
@@ -470,84 +726,21 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "switch_select_from_const_branches",
             ruleset,
-            || {
-                let pred = schema_dsl::Expr::query_leaf();
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let x: schema_dsl::Constant<PeepholePatRec, _> = schema_dsl::Constant::query_leaf();
-                let y: schema_dsl::Constant<PeepholePatRec, _> = schema_dsl::Constant::query_leaf();
-                let branch_ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let els_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let thn_const = schema_dsl::Const::query(&x, &branch_ty, &thn_ctx);
-                let els_const = schema_dsl::Const::query(&y, &branch_ty, &els_ctx);
-
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ContextOf",
-                    vec![node_expr(&if_e), node_expr(&ctx)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "HasArgType",
-                    vec![node_expr(&if_e), node_expr(&ty)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_const),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_const),
-                    "Get",
-                    vec![node_expr(&els), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_ctx),
-                    "InIf",
-                    vec![bool_expr(true), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_ctx),
-                    "InIf",
-                    vec![bool_expr(false), node_expr(&pred), node_expr(&inputs)],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchSelectConstPat {
-                    pred: schema_dsl::Expr,
-                    ctx: schema_dsl::Assumption,
-                    ty: schema_dsl::Type,
-                    x: schema_dsl::Constant,
-                    y: schema_dsl::Constant,
-                    if_out: schema_dsl::Expr,
-                }
-            },
+            switch_select_const_pat,
             |ctx, pat| {
                 let lhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Const",
                     &[pat.x.val, pat.ty.val, pat.ctx.val],
                 );
                 let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Const",
                     &[pat.y.val, pat.ty.val, pat.ctx.val],
                 );
-                let op = insert_call::<schema_dsl::TernaryOp>(ctx, "Select", &[]);
+                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
                 let result = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Top",
                     &[op.0.val, pat.pred.val, lhs.0.val, rhs.0.val],
                 );
@@ -558,96 +751,18 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "switch_select_with_else_const",
             ruleset,
-            || {
-                let pred = schema_dsl::Expr::query_leaf();
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let a = schema_dsl::Expr::query_leaf();
-                let ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let thn_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let y = IntB::query();
-
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ContextOf",
-                    vec![node_expr(&if_e), node_expr(&ctx)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "HasArgType",
-                    vec![node_expr(&if_e), node_expr(&ty)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&a),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_ctx),
-                    "InIf",
-                    vec![bool_expr(true), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![var_expr("_ty"), node_expr(&thn_ctx)]),
-                        var_expr("i"),
-                    ],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&y),
-                    "lo-bound",
-                    vec![node_expr(&els_out)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&y),
-                    "hi-bound",
-                    vec![node_expr(&els_out)],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchSelectElseConstPat {
-                    pred: schema_dsl::Expr,
-                    a: schema_dsl::Expr,
-                    ctx: schema_dsl::Assumption,
-                    ty: schema_dsl::Type,
-                    y: IntB,
-                    if_out: schema_dsl::Expr,
-                }
-            },
+            switch_select_else_const_pat,
             |ctx, pat| {
                 let constant =
-                    insert_call::<schema_dsl::Constant>(ctx, "Int", &[pat.y.value.val]);
+                    insert_call::<schema_dsl::Constant>(&ctx.ctx, "Int", &[pat.y.value.val]);
                 let rhs_const = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Const",
                     &[constant.0.val, pat.ty.val, pat.ctx.val],
                 );
-                let op = insert_call::<schema_dsl::TernaryOp>(ctx, "Select", &[]);
+                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
                 let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Top",
                     &[op.0.val, pat.pred.val, pat.a.val, rhs_const.0.val],
                 );
@@ -658,96 +773,18 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "switch_select_with_then_const",
             ruleset,
-            || {
-                let pred = schema_dsl::Expr::query_leaf();
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let ty: schema_dsl::Type<PeepholePatRec, _> = schema_dsl::Type::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let y = IntB::query();
-
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ContextOf",
-                    vec![node_expr(&if_e), node_expr(&ctx)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "HasArgType",
-                    vec![node_expr(&if_e), node_expr(&ty)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&y),
-                    "lo-bound",
-                    vec![node_expr(&thn_out)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&y),
-                    "hi-bound",
-                    vec![node_expr(&thn_out)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&b),
-                    "Get",
-                    vec![node_expr(&inputs), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_ctx),
-                    "InIf",
-                    vec![bool_expr(false), node_expr(&pred), node_expr(&inputs)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("k")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![
-                        call_expr("Arg", vec![var_expr("_ty"), node_expr(&els_ctx)]),
-                        var_expr("i"),
-                    ],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchSelectThenConstPat {
-                    pred: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    ctx: schema_dsl::Assumption,
-                    ty: schema_dsl::Type,
-                    y: IntB,
-                    if_out: schema_dsl::Expr,
-                }
-            },
+            switch_select_then_const_pat,
             |ctx, pat| {
                 let constant =
-                    insert_call::<schema_dsl::Constant>(ctx, "Int", &[pat.y.value.val]);
+                    insert_call::<schema_dsl::Constant>(&ctx.ctx, "Int", &[pat.y.value.val]);
                 let lhs_const = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Const",
                     &[constant.0.val, pat.ty.val, pat.ctx.val],
                 );
-                let op = insert_call::<schema_dsl::TernaryOp>(ctx, "Select", &[]);
+                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
                 let rhs = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Top",
                     &[op.0.val, pat.pred.val, lhs_const.0.val, pat.b.val],
                 );
@@ -758,122 +795,89 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "switch_and_reassociate",
             ruleset,
-            || {
-                let a = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let ins = schema_dsl::Expr::query_leaf();
-                let x = schema_dsl::Expr::query_leaf();
-                let y = schema_dsl::Expr::query_leaf();
-                let lhs = schema_dsl::If::query(
-                    &schema_dsl::Bop::query(&schema_dsl::And::query(), &a, &b),
-                    &ins,
-                    &x,
-                    &y,
-                );
-                let ins_ty: schema_dsl::TypeList<PeepholePatRec, _> =
-                    schema_dsl::TypeList::query_leaf();
-
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "HasType",
-                    vec![node_expr(&ins), call_expr("TupleT", vec![node_expr(&ins_ty)])],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    var_expr("len"),
-                    "tuple-length",
-                    vec![node_expr(&ins)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "<",
-                    vec![call_expr("Expr-size", vec![node_expr(&y)]), i64_expr(100)],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchAndPat {
-                    lhs: schema_dsl::If,
-                    a: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    ins: schema_dsl::Expr,
-                    x: schema_dsl::Expr,
-                    y: schema_dsl::Expr,
-                    ins_ty: schema_dsl::TypeList,
-                }
-            },
+            switch_and_pat,
             |ctx, pat| {
-                let len = insert_call::<i64>(ctx, "tuple-length", &[pat.ins.val]);
-                let single_b = insert_call::<schema_dsl::Expr>(ctx, "Single", &[pat.b.val]);
+                let len = insert_call::<i64>(&ctx.ctx, "tuple-length", &[pat.ins.val]);
+                let single_b = insert_call::<schema_dsl::Expr>(&ctx.ctx, "Single", &[pat.b.val]);
                 let outer_ins = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Concat",
                     &[single_b.0.val, pat.ins.val],
                 );
-                let bool_ty = insert_call::<schema_dsl::BaseType>(ctx, "BoolT", &[]);
+                let bool_ty = insert_call::<schema_dsl::BaseType>(&ctx.ctx, "BoolT", &[]);
                 let outer_ins_ty_list = insert_call::<schema_dsl::TypeList>(
-                    ctx,
+                    &ctx.ctx,
                     "TCons",
                     &[bool_ty.0.val, pat.ins_ty.val],
                 );
-                let outer_ins_ty = insert_call::<schema_dsl::Type>(
-                    ctx,
-                    "TupleT",
-                    &[outer_ins_ty_list.0.val],
-                );
+                let outer_ins_ty =
+                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[outer_ins_ty_list.0.val]);
                 let if_true = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[true.to_value(ctx).val, pat.a.val, outer_ins.0.val],
+                    &[true.to_value(&ctx.ctx).val, pat.a.val, outer_ins.0.val],
                 );
                 let if_false = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[false.to_value(ctx).val, pat.a.val, outer_ins.0.val],
+                    &[false.to_value(&ctx.ctx).val, pat.a.val, outer_ins.0.val],
                 );
                 let arg_true = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Arg",
                     &[outer_ins_ty.0.val, if_true.0.val],
                 );
                 let arg_false = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Arg",
                     &[outer_ins_ty.0.val, if_false.0.val],
                 );
                 let inner_pred = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Get",
-                    &[arg_true.0.val, 0_i64.to_value(ctx).val],
+                    &[arg_true.0.val, 0_i64.to_value(&ctx.ctx).val],
                 );
                 let sub_arg_true = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "SubTuple",
-                    &[arg_true.0.val, 1_i64.to_value(ctx).val, len.0.val],
+                    &[arg_true.0.val, 1_i64.to_value(&ctx.ctx).val, len.0.val],
                 );
                 let sub_arg_false = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "SubTuple",
-                    &[arg_false.0.val, 1_i64.to_value(ctx).val, len.0.val],
+                    &[arg_false.0.val, 1_i64.to_value(&ctx.ctx).val, len.0.val],
                 );
                 let inner_false_ctx = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[false.to_value(ctx).val, inner_pred.0.val, sub_arg_true.0.val],
+                    &[
+                        false.to_value(&ctx.ctx).val,
+                        inner_pred.0.val,
+                        sub_arg_true.0.val,
+                    ],
                 );
                 let inner_y = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "AddContext",
                     &[inner_false_ctx.0.val, pat.y.val],
                 );
                 let outer_y = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Subst",
                     &[if_false.0.val, sub_arg_false.0.val, pat.y.val],
                 );
                 let inner = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "If",
-                    &[inner_pred.0.val, sub_arg_true.0.val, pat.x.val, inner_y.0.val],
+                    &[
+                        inner_pred.0.val,
+                        sub_arg_true.0.val,
+                        pat.x.val,
+                        inner_y.0.val,
+                    ],
                 );
                 let outer = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "If",
                     &[pat.a.val, outer_ins.0.val, inner.0.val, outer_y.0.val],
                 );
@@ -884,131 +888,93 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "switch_or_reassociate",
             ruleset,
-            || {
-                let a = schema_dsl::Expr::query_leaf();
-                let b = schema_dsl::Expr::query_leaf();
-                let ins = schema_dsl::Expr::query_leaf();
-                let x = schema_dsl::Expr::query_leaf();
-                let y = schema_dsl::Expr::query_leaf();
-                let lhs = schema_dsl::If::query(
-                    &schema_dsl::Bop::query(&schema_dsl::Or::query(), &a, &b),
-                    &ins,
-                    &x,
-                    &y,
-                );
-                let ins_ty: schema_dsl::TypeList<PeepholePatRec, _> =
-                    schema_dsl::TypeList::query_leaf();
-
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "HasType",
-                    vec![node_expr(&ins), call_expr("TupleT", vec![node_expr(&ins_ty)])],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    var_expr("len"),
-                    "tuple-length",
-                    vec![node_expr(&ins)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "<",
-                    vec![call_expr("Expr-size", vec![node_expr(&x)]), i64_expr(100)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "<",
-                    vec![call_expr("Expr-size", vec![node_expr(&y)]), i64_expr(100)],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SwitchOrPat {
-                    lhs: schema_dsl::If,
-                    a: schema_dsl::Expr,
-                    b: schema_dsl::Expr,
-                    ins: schema_dsl::Expr,
-                    x: schema_dsl::Expr,
-                    y: schema_dsl::Expr,
-                    ins_ty: schema_dsl::TypeList,
-                }
-            },
+            switch_or_pat,
             |ctx, pat| {
-                let len = insert_call::<i64>(ctx, "tuple-length", &[pat.ins.val]);
-                let single_b = insert_call::<schema_dsl::Expr>(ctx, "Single", &[pat.b.val]);
+                let len = insert_call::<i64>(&ctx.ctx, "tuple-length", &[pat.ins.val]);
+                let single_b = insert_call::<schema_dsl::Expr>(&ctx.ctx, "Single", &[pat.b.val]);
                 let outer_ins = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Concat",
                     &[single_b.0.val, pat.ins.val],
                 );
-                let bool_ty = insert_call::<schema_dsl::BaseType>(ctx, "BoolT", &[]);
+                let bool_ty = insert_call::<schema_dsl::BaseType>(&ctx.ctx, "BoolT", &[]);
                 let outer_ins_ty_list = insert_call::<schema_dsl::TypeList>(
-                    ctx,
+                    &ctx.ctx,
                     "TCons",
                     &[bool_ty.0.val, pat.ins_ty.val],
                 );
-                let outer_ins_ty = insert_call::<schema_dsl::Type>(
-                    ctx,
-                    "TupleT",
-                    &[outer_ins_ty_list.0.val],
-                );
+                let outer_ins_ty =
+                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[outer_ins_ty_list.0.val]);
                 let if_true = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[true.to_value(ctx).val, pat.a.val, outer_ins.0.val],
+                    &[true.to_value(&ctx.ctx).val, pat.a.val, outer_ins.0.val],
                 );
                 let if_false = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[false.to_value(ctx).val, pat.a.val, outer_ins.0.val],
+                    &[false.to_value(&ctx.ctx).val, pat.a.val, outer_ins.0.val],
                 );
                 let arg_true = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Arg",
                     &[outer_ins_ty.0.val, if_true.0.val],
                 );
                 let arg_false = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Arg",
                     &[outer_ins_ty.0.val, if_false.0.val],
                 );
                 let inner_pred = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Get",
-                    &[arg_false.0.val, 0_i64.to_value(ctx).val],
+                    &[arg_false.0.val, 0_i64.to_value(&ctx.ctx).val],
                 );
                 let sub_arg_true = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "SubTuple",
-                    &[arg_true.0.val, 1_i64.to_value(ctx).val, len.0.val],
+                    &[arg_true.0.val, 1_i64.to_value(&ctx.ctx).val, len.0.val],
                 );
                 let sub_arg_false = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "SubTuple",
-                    &[arg_false.0.val, 1_i64.to_value(ctx).val, len.0.val],
+                    &[arg_false.0.val, 1_i64.to_value(&ctx.ctx).val, len.0.val],
                 );
                 let outer_x = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Subst",
                     &[if_true.0.val, sub_arg_true.0.val, pat.x.val],
                 );
                 let inner_true_ctx = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[true.to_value(ctx).val, inner_pred.0.val, sub_arg_false.0.val],
+                    &[
+                        true.to_value(&ctx.ctx).val,
+                        inner_pred.0.val,
+                        sub_arg_false.0.val,
+                    ],
                 );
                 let inner_false_ctx = insert_call::<schema_dsl::Assumption>(
-                    ctx,
+                    &ctx.ctx,
                     "InIf",
-                    &[false.to_value(ctx).val, inner_pred.0.val, sub_arg_false.0.val],
+                    &[
+                        false.to_value(&ctx.ctx).val,
+                        inner_pred.0.val,
+                        sub_arg_false.0.val,
+                    ],
                 );
                 let inner_x = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "AddContext",
                     &[inner_true_ctx.0.val, pat.x.val],
                 );
                 let inner_y = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "AddContext",
                     &[inner_false_ctx.0.val, pat.y.val],
                 );
                 let inner = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "If",
                     &[
                         inner_pred.0.val,
@@ -1018,7 +984,7 @@ pub(crate) mod native {
                     ],
                 );
                 let outer = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "If",
                     &[pat.a.val, outer_ins.0.val, outer_x.0.val, inner.0.val],
                 );
@@ -1066,7 +1032,7 @@ mod native_tests {
                 binding.into(),
             ))?;
             let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
-            Ok(termdag.to_string(&extracted))
+            Ok(termdag.to_string(extracted))
         })
         .unwrap()
     }
@@ -1080,10 +1046,8 @@ mod native_tests {
         let right = "(Const (Int 5) (Base (IntT)) (InFunc \"RLCR\"))";
         let pred = format!("(Bop (LessThan) {left} {right})");
         let inputs = format!("(Concat (Single {left}) (Single {right}))");
-        let then_branch =
-            format!("(Single (Get (Arg {tuple_ty} (InIf true {pred} {inputs})) 0))");
-        let else_branch =
-            format!("(Single (Get (Arg {tuple_ty} (InIf false {pred} {inputs})) 1))");
+        let then_branch = format!("(Single (Get (Arg {tuple_ty} (InIf true {pred} {inputs})) 0))");
+        let else_branch = format!("(Single (Get (Arg {tuple_ty} (InIf false {pred} {inputs})) 1))");
         let expr = format!("(Get (If {pred} {inputs} {then_branch} {else_branch}) 0)");
         let schedule = format!(
             "(run-schedule\n{}\n(saturate switch_rewrite)\n)",
@@ -1111,10 +1075,8 @@ mod native_tests {
         let right = "(Const (Int 5) (Base (IntT)) (InFunc \"RLCR\"))";
         let pred = format!("(Bop (LessThan) {left} {right})");
         let inputs = format!("(Concat (Single {left}) (Single {right}))");
-        let then_branch =
-            format!("(Single (Get (Arg {tuple_ty} (InIf true {pred} {inputs})) 0))");
-        let else_branch =
-            format!("(Single (Get (Arg {tuple_ty} (InIf false {pred} {inputs})) 1))");
+        let then_branch = format!("(Single (Get (Arg {tuple_ty} (InIf true {pred} {inputs})) 0))");
+        let else_branch = format!("(Single (Get (Arg {tuple_ty} (InIf false {pred} {inputs})) 1))");
         let expr = format!("(Get (If {pred} {inputs} {then_branch} {else_branch}) 0)");
         let schedule = format!(
             "(run-schedule\n{}\n(saturate switch_rewrite)\n)",

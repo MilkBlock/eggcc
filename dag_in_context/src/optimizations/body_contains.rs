@@ -13,7 +13,6 @@ fn captured_expr_rule_for_ctor(ctor: Constructor) -> Option<String> {
         (field.purpose == Purpose::CapturedExpr)
             .then(|| format!("(BodyContainsExpr {e} {e})", e = field.var()))
     });
-    // TODO body contains for switches
 
     if actions.is_empty() {
         None
@@ -33,7 +32,11 @@ fn captured_expr_rule_for_ctor(ctor: Constructor) -> Option<String> {
 fn subexpr_rule_for_ctor(ctor: Constructor) -> Option<String> {
     let pat = ctor.construct(|field| field.var());
     let actions = ctor.filter_map_fields(|field| {
-        (field.purpose == Purpose::SubExpr).then(|| {
+        matches!(
+            field.purpose,
+            Purpose::SubExpr | Purpose::CapturedSubListExpr
+        )
+        .then(|| {
             format!(
                 "(BodyContains{sort} body {e})",
                 sort = field.sort().name(),

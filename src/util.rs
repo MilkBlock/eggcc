@@ -292,6 +292,7 @@ pub enum TestProgram {
     Prog(ProgWithArguments),
     BrilFile(PathBuf),
     RustFile(PathBuf),
+    CudaFile(PathBuf),
 }
 
 impl TestProgram {
@@ -319,6 +320,21 @@ impl TestProgram {
                 let syntax = syn::parse_file(&src).unwrap();
                 let name = path.file_stem().unwrap().to_str().unwrap().to_string();
                 let program = rs2bril::from_file_to_program(syntax, false, Some(name.clone()));
+
+                ProgWithArguments {
+                    program,
+                    name,
+                    args,
+                }
+            }
+            TestProgram::CudaFile(path) => {
+                let mut src = String::new();
+                let mut file = std::fs::File::open(path.clone()).unwrap();
+
+                file.read_to_string(&mut src).unwrap();
+                let args = Optimizer::parse_bril_args(&src);
+                let name = path.file_stem().unwrap().to_str().unwrap().to_string();
+                let program = Optimizer::parse_cuda_file(&path).unwrap();
 
                 ProgWithArguments {
                     program,

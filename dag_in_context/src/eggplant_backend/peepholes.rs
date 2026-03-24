@@ -85,16 +85,20 @@ pub(crate) mod native {
                 let x = schema_dsl::Expr::query_leaf();
                 let ty = schema_dsl::Type::query_leaf();
                 let ctx = schema_dsl::Assumption::query_leaf();
-                let z = schema_dsl::Int::query().value(&0);
+                let z = schema_dsl::Int::query();
+                let z_is_zero = z.handle_value().eq(&0_i64);
                 let zero = schema_dsl::Const::query(&z, &ty, &ctx);
                 let add_op = schema_dsl::Add::query();
                 let add = schema_dsl::Bop::query(&add_op, &zero, &x);
-                #[eggplant::pat_vars_catch]
-                struct AddZeroLhsPat {
-                    x: schema_dsl::Expr,
-                    z: schema_dsl::Int,
-                    add: schema_dsl::Bop,
+                {
+                    #[eggplant::pat_vars_catch]
+                    struct AddZeroLhsPat {
+                        x: schema_dsl::Expr,
+                        z: schema_dsl::Int,
+                        add: schema_dsl::Bop,
+                    }
                 }
+                .assert(z_is_zero)
             },
             |ctx, pat| {
                 let _ = ctx.devalue(pat.z.value);
@@ -109,16 +113,20 @@ pub(crate) mod native {
                 let x = schema_dsl::Expr::query_leaf();
                 let ty = schema_dsl::Type::query_leaf();
                 let ctx = schema_dsl::Assumption::query_leaf();
-                let z = schema_dsl::Int::query().value(&0);
+                let z = schema_dsl::Int::query();
+                let z_is_zero = z.handle_value().eq(&0_i64);
                 let zero = schema_dsl::Const::query(&z, &ty, &ctx);
                 let add_op = schema_dsl::Add::query();
                 let add = schema_dsl::Bop::query(&add_op, &x, &zero);
-                #[eggplant::pat_vars_catch]
-                struct AddZeroRhsPat {
-                    x: schema_dsl::Expr,
-                    z: schema_dsl::Int,
-                    add: schema_dsl::Bop,
+                {
+                    #[eggplant::pat_vars_catch]
+                    struct AddZeroRhsPat {
+                        x: schema_dsl::Expr,
+                        z: schema_dsl::Int,
+                        add: schema_dsl::Bop,
+                    }
                 }
+                .assert(z_is_zero)
             },
             |ctx, pat| {
                 let _ = ctx.devalue(pat.z.value);
@@ -133,16 +141,20 @@ pub(crate) mod native {
                 let x = schema_dsl::Expr::query_leaf();
                 let ty = schema_dsl::Type::query_leaf();
                 let ctx = schema_dsl::Assumption::query_leaf();
-                let one = schema_dsl::Int::query().value(&1);
+                let one = schema_dsl::Int::query();
+                let one_is_one = one.handle_value().eq(&1_i64);
                 let one_const = schema_dsl::Const::query(&one, &ty, &ctx);
                 let mul_op = schema_dsl::Mul::query();
                 let mul = schema_dsl::Bop::query(&mul_op, &x, &one_const);
-                #[eggplant::pat_vars_catch]
-                struct MulOneRhsPat {
-                    x: schema_dsl::Expr,
-                    one: schema_dsl::Int,
-                    mul: schema_dsl::Bop,
+                {
+                    #[eggplant::pat_vars_catch]
+                    struct MulOneRhsPat {
+                        x: schema_dsl::Expr,
+                        one: schema_dsl::Int,
+                        mul: schema_dsl::Bop,
+                    }
                 }
+                .assert(one_is_one)
             },
             |ctx, pat| {
                 let _ = ctx.devalue(pat.one.value);
@@ -173,8 +185,8 @@ pub(crate) mod native {
             },
             |ctx, pat| {
                 let sum = ctx.devalue(pat.lhs_int.value) + ctx.devalue(pat.rhs_int.value);
-                let folded = ctx.insert_int(sum);
-                let folded = ctx.insert_const(folded, pat.ty, pat.ctx);
+                let folded = ctx.ctx.insert_int(sum);
+                let folded = ctx.ctx.insert_const(folded, pat.ty, pat.ctx);
                 ctx.union(pat.add, folded);
             },
         );
@@ -267,20 +279,14 @@ mod native_tests {
         let initialization = format!("(let {binding} {expr})");
         use eggplant::egglog::ast::Expr as NativeEgglogExpr;
 
-        crate::with_native_rules_egraph(
-            prologue,
-            &initialization,
-            schedule,
-            ablate,
-            |egraph| {
-                let (sort, value) = egraph.eval_expr(&NativeEgglogExpr::Var(
-                    eggplant::egglog::ast::Span::Panic,
-                    binding.into(),
-                ))?;
-                let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
-                Ok(termdag.to_string(&extracted))
-            },
-        )
+        crate::with_native_rules_egraph(prologue, &initialization, schedule, ablate, |egraph| {
+            let (sort, value) = egraph.eval_expr(&NativeEgglogExpr::Var(
+                eggplant::egglog::ast::Span::Panic,
+                binding.into(),
+            ))?;
+            let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
+            Ok(termdag.to_string(extracted))
+        })
         .unwrap()
     }
 
@@ -344,9 +350,9 @@ mod native_tests {
             "text backend baseline for the arithmetic peephole case should match the expected form",
         );
 
-        let x_node: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Opaque::new();
-        let y_node: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Opaque::new();
-        let arithmetic: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Bop::new(
+        let x_node = schema_dsl::Opaque::new();
+        let y_node = schema_dsl::Opaque::new();
+        let arithmetic = schema_dsl::Bop::new(
             &schema_dsl::Add::new(),
             &schema_dsl::Bop::new(
                 &schema_dsl::Add::new(),
@@ -361,7 +367,7 @@ mod native_tests {
         );
         arithmetic.commit();
 
-        let arithmetic_expected: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Bop::new(
+        let arithmetic_expected = schema_dsl::Bop::new(
             &schema_dsl::Add::new(),
             &x_node,
             &schema_dsl::Bop::new(&schema_dsl::Add::new(), &int_const(3), &y_node),
@@ -382,14 +388,14 @@ mod native_tests {
         let _guard = test_lock::lock();
         let ruleset = register_native_rules("native_peepholes_round1_select");
 
-        let select_expr: schema_dsl::Expr<PeepholeTx, _> = schema_dsl::Top::new(
+        let select_expr = schema_dsl::Top::new(
             &schema_dsl::Select::new(),
             &int_const(1),
             &int_const(9),
             &int_const(9),
         );
         select_expr.commit();
-        let select_expected: schema_dsl::Expr<PeepholeTx, _> = int_const(9);
+        let select_expected = int_const(9);
         select_expected.commit();
 
         PeepholeTx::run_ruleset(ruleset, RunConfig::Sat);

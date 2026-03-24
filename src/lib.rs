@@ -3,11 +3,12 @@ use bril_rs::Program;
 
 use cfg::{program_to_cfg, SimpleCfgProgram};
 use conversions::check_for_uninitialized_vars;
+use cuda_frontend::lower_cuda_to_program;
 use dag_in_context::interpreter::{interpret_dag_prog, Value};
 use dag_in_context::schema::Constant;
 use ordered_float::OrderedFloat;
 use rvsdg::{RvsdgError, RvsdgProgram};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use util::Interpretable;
 
@@ -16,6 +17,7 @@ use thiserror::Error;
 pub mod canonicalize_names;
 pub(crate) mod cfg;
 mod conversions;
+pub mod cuda_frontend;
 pub(crate) mod rvsdg;
 pub mod util;
 
@@ -221,6 +223,14 @@ impl Optimizer {
         check_for_uninitialized_vars(&prog)?;
 
         Ok(prog)
+    }
+
+    pub fn parse_cuda(source: &str, unit_name: &str) -> Result<Program, EggCCError> {
+        lower_cuda_to_program(source, unit_name)
+    }
+
+    pub fn parse_cuda_file(path: &Path) -> Result<Program, EggCCError> {
+        cuda_frontend::lower_cuda_file_to_program(path)
     }
 
     pub fn program_to_cfg(program: &Program) -> SimpleCfgProgram {

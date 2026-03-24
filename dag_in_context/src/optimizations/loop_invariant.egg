@@ -18,6 +18,8 @@
     ((is-inv-ListExpr body list)) :ruleset always-run)
 
 
+(ruleset loop-invariant-generated)
+
 (ruleset boundary-analysis)
 (ruleset boundary-analysis-prep)
 

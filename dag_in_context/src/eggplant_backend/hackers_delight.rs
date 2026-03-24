@@ -6,8 +6,32 @@ pub(crate) fn fragment() -> String {
     out
 }
 
+#[cfg(feature = "eggplant")]
+pub(crate) fn native_fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(HACKERS_DELIGHT_SUPPORT);
+    out.push('\n');
+    out
+}
+
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/hackers_delight.rs)\n";
+const HACKERS_DELIGHT_SUPPORT: &str = r#";; Hacker's delight optimizations
+
+;; A simple analysis to identify loops that run exactly #popcount times
+
+;; IsIsEven e x => e is a boolean expression that checks whether x is an even number
+(relation IsIsEven (Expr Expr))
+
+;; NTZIterations lp n pos => loop lp runs exactly number_of_trailing_zeros(n) times at index pos
+(relation NTZIterations (Expr Expr i64))
+
+;; Try to do a state-edge-passthrough for loops
+;; NLZIterations guarantees termination for non-zero values
+;; lowbit(0) is undefined behavior
+
+(constructor DummyLoopContext (Expr Expr Expr) Assumption)"#;
 const HACKERS_DELIGHT: &str = r#";; Hacker's delight optimizations
 
 (ruleset hacker)
@@ -98,3 +122,388 @@ const HACKERS_DELIGHT: &str = r#";; Hacker's delight optimizations
     (union (Get thenbr j) (Get lpinputs j))
 
 ) :ruleset hacker)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::insert_call;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+    };
+
+    #[eggplant::pat_vars]
+    struct IsEvenPat<PR: PatRecSgl> {
+        x: schema_dsl::Expr,
+        e: schema_dsl::Bop,
+    }
+
+    fn int_const<PR: PatRecSgl>(
+        value: i64,
+    ) -> (
+        schema_dsl::Expr<PR, schema_dsl::ConstTy>,
+        eggplant::wrap::EqConstraint<i64, i64>,
+    ) {
+        let int_expr = schema_dsl::Int::query();
+        let value_matches = int_expr.handle_value().eq(&value);
+        let const_expr = schema_dsl::Const::query(
+            &int_expr,
+            &schema_dsl::Type::query_leaf(),
+            &schema_dsl::Assumption::query_leaf(),
+        );
+        (const_expr, value_matches)
+    }
+
+    fn arg_get<PR: PatRecSgl>() -> schema_dsl::Get<PR> {
+        schema_dsl::Get::query(&schema_dsl::Arg::query(
+            &schema_dsl::Type::query_leaf(),
+            &schema_dsl::Assumption::query_leaf(),
+        ))
+    }
+
+    fn state_type<PR: PatRecSgl>() -> schema_dsl::Type<PR, schema_dsl::BaseTy> {
+        schema_dsl::Base::query(&schema_dsl::StateT::query())
+    }
+
+    fn is_even_pat<PR: PatRecSgl>() -> IsEvenPat<PR> {
+        let x = schema_dsl::Expr::query_leaf();
+        let (two, two_matches_value) = int_const(2);
+        let div = schema_dsl::Bop::query(&schema_dsl::Div::query(), &x, &two);
+        let mul = schema_dsl::Bop::query(&schema_dsl::Mul::query(), &div, &two);
+        let e = schema_dsl::Bop::query(&schema_dsl::Eq::query(), &x, &mul);
+
+        IsEvenPat::new(x, e).assert(two_matches_value)
+    }
+
+    #[eggplant::pat_vars]
+    struct NtzIterationsPat<PR: PatRecSgl> {
+        outerif: schema_dsl::If,
+        n: schema_dsl::Get,
+        lp_input_j: schema_dsl::Get,
+        arg_i: schema_dsl::Get,
+        two: schema_dsl::Const,
+    }
+
+    fn ntz_iterations_pat<PR: PatRecSgl>() -> NtzIterationsPat<PR> {
+        let cond = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let evenbr = schema_dsl::Expr::query_leaf();
+        let oddbr = schema_dsl::Expr::query_leaf();
+        let outerif = schema_dsl::If::query(&cond, &inputs, &evenbr, &oddbr);
+
+        let n = schema_dsl::Get::query(&inputs);
+        let cond_is_even = prim_fact(
+            "IsIsEven",
+            vec![cond.handle().into_handle_ty(), n.handle().into_handle_ty()],
+        );
+
+        let lp_inputs = schema_dsl::Expr::query_leaf();
+        let lp_pred_outputs = schema_dsl::Expr::query_leaf();
+        let even_loop = schema_dsl::DoWhile::query(&lp_inputs, &lp_pred_outputs);
+        let even_branch_matches = evenbr.handle().eq(&even_loop.handle());
+
+        let lp_input_j = schema_dsl::Get::query(&lp_inputs);
+        let arg_i = arg_get();
+        let same_outer_index = n.handle_index().eq(&arg_i.handle_index());
+        let same_loop_input_value = lp_input_j.handle().eq(&arg_i.handle());
+
+        let (two, two_matches_value) = int_const(2);
+
+        let arg_j = arg_get();
+        let same_loop_index = lp_input_j.handle_index().eq(&arg_j.handle_index());
+        let nd2 = schema_dsl::Bop::query(&schema_dsl::Div::query(), &arg_j, &two);
+        let pred0 = schema_dsl::Get::query(&lp_pred_outputs);
+        let pred0_is_first = pred0.handle_index().eq(&(&0_i64).as_handle());
+        let pred_is_even = prim_fact(
+            "IsIsEven",
+            vec![
+                pred0.handle().into_handle_ty(),
+                nd2.handle().into_handle_ty(),
+            ],
+        );
+        let pred_next = schema_dsl::Get::query(&lp_pred_outputs);
+        let pred_next_matches = pred_next.handle().eq(&nd2.handle());
+        let pred_next_index_matches = pred_next
+            .handle_index()
+            .eq(&(lp_input_j.handle_index() + (&1_i64).as_handle()));
+
+        let odd_j = schema_dsl::Get::query(&oddbr);
+        let odd_index_matches = odd_j.handle_index().eq(&lp_input_j.handle_index());
+        let odd_matches_outer = odd_j.handle().eq(&arg_i.handle());
+
+        NtzIterationsPat::new(outerif, n, lp_input_j, arg_i, two)
+            .assert(cond_is_even)
+            .assert(even_branch_matches)
+            .assert(same_outer_index)
+            .assert(same_loop_input_value)
+            .assert(same_loop_index)
+            .assert(two_matches_value)
+            .assert(pred0_is_first)
+            .assert(pred_is_even)
+            .assert(pred_next_matches)
+            .assert(pred_next_index_matches)
+            .assert(odd_index_matches)
+            .assert(odd_matches_outer)
+    }
+
+    #[eggplant::pat_vars]
+    struct LowbitPat<PR: PatRecSgl> {
+        n: schema_dsl::Expr,
+        outer_i: schema_dsl::Get,
+        outer_j: schema_dsl::Get,
+        lp_inputs: schema_dsl::Expr,
+        one: schema_dsl::Const,
+        two: schema_dsl::Const,
+        one_else: schema_dsl::Const,
+    }
+
+    fn lowbit_pat<PR: PatRecSgl>() -> LowbitPat<PR> {
+        let cond = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let evenbr = schema_dsl::Expr::query_leaf();
+        let oddbr = schema_dsl::Expr::query_leaf();
+        let outerif = schema_dsl::If::query(&cond, &inputs, &evenbr, &oddbr);
+
+        let n = schema_dsl::Expr::query_leaf();
+        let outer_i = schema_dsl::Get::query(&outerif);
+        let ntz = prim_fact(
+            "NTZIterations",
+            vec![
+                outerif.handle().into_handle_ty(),
+                n.handle().into_handle_ty(),
+                outer_i.handle_index().into_handle_ty(),
+            ],
+        );
+
+        let lp_inputs = schema_dsl::Expr::query_leaf();
+        let lp_pred_outputs = schema_dsl::Expr::query_leaf();
+        let even_loop = schema_dsl::DoWhile::query(&lp_inputs, &lp_pred_outputs);
+        let even_branch_matches = evenbr.handle().eq(&even_loop.handle());
+
+        let lp_input_j = schema_dsl::Get::query(&lp_inputs);
+        let (one, one_matches_value) = int_const(1);
+        let loop_input_is_one = lp_input_j.handle().eq(&one.handle());
+
+        let (two, two_matches_value) = int_const(2);
+        let arg_j = arg_get();
+        let same_loop_index = lp_input_j.handle_index().eq(&arg_j.handle_index());
+        let body_next = schema_dsl::Get::query(&lp_pred_outputs);
+        let doubled = schema_dsl::Bop::query(&schema_dsl::Mul::query(), &arg_j, &two);
+        let body_next_matches = body_next.handle().eq(&doubled.handle());
+        let body_next_index_matches = body_next
+            .handle_index()
+            .eq(&(lp_input_j.handle_index() + (&1_i64).as_handle()));
+
+        let odd_j = schema_dsl::Get::query(&oddbr);
+        let odd_index_matches = odd_j.handle_index().eq(&lp_input_j.handle_index());
+        let (one_else, one_else_matches_value) = int_const(1);
+        let odd_is_one = odd_j.handle().eq(&one_else.handle());
+
+        let outer_j = schema_dsl::Get::query(&outerif);
+        let outer_j_index_matches = outer_j.handle_index().eq(&lp_input_j.handle_index());
+
+        LowbitPat::new(n, outer_i, outer_j, lp_inputs, one, two, one_else)
+            .assert(ntz)
+            .assert(even_branch_matches)
+            .assert(loop_input_is_one)
+            .assert(one_matches_value)
+            .assert(same_loop_index)
+            .assert(body_next_matches)
+            .assert(body_next_index_matches)
+            .assert(odd_index_matches)
+            .assert(odd_is_one)
+            .assert(two_matches_value)
+            .assert(one_else_matches_value)
+            .assert(outer_j_index_matches)
+    }
+
+    #[eggplant::pat_vars]
+    struct HackerLoopStateEdgePat<PR: PatRecSgl> {
+        n: schema_dsl::Expr,
+        thenbr: schema_dsl::Expr,
+        lpinputs: schema_dsl::Expr,
+        pred_outputs: schema_dsl::Expr,
+        arg_j: schema_dsl::Get,
+    }
+
+    fn hacker_loop_state_edge_pat<PR: PatRecSgl>() -> HackerLoopStateEdgePat<PR> {
+        let cond = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thenbr = schema_dsl::Expr::query_leaf();
+        let elsebr = schema_dsl::Expr::query_leaf();
+        let anyif = schema_dsl::If::query(&cond, &inputs, &thenbr, &elsebr);
+        let n = schema_dsl::Expr::query_leaf();
+        let outer_i = schema_dsl::Get::query(&anyif);
+        let ntz = prim_fact(
+            "NTZIterations",
+            vec![
+                anyif.handle().into_handle_ty(),
+                n.handle().into_handle_ty(),
+                outer_i.handle_index().into_handle_ty(),
+            ],
+        );
+
+        let lpinputs = schema_dsl::Expr::query_leaf();
+        let pred_outputs = schema_dsl::Expr::query_leaf();
+        let then_loop = schema_dsl::DoWhile::query(&lpinputs, &pred_outputs);
+        let then_branch_matches = thenbr.handle().eq(&then_loop.handle());
+
+        let arg_j = arg_get();
+        let pred_next = schema_dsl::Get::query(&pred_outputs);
+        let pred_next_matches = pred_next.handle().eq(&arg_j.handle());
+        let pred_next_index_matches = pred_next
+            .handle_index()
+            .eq(&(arg_j.handle_index() + (&1_i64).as_handle()));
+        let has_state_type = prim_fact(
+            "HasType",
+            vec![
+                pred_next.handle().into_handle_ty(),
+                state_type::<PR>().handle().into_handle_ty(),
+            ],
+        );
+
+        HackerLoopStateEdgePat::new(n, thenbr, lpinputs, pred_outputs, arg_j)
+            .assert(ntz)
+            .assert(then_branch_matches)
+            .assert(pred_next_matches)
+            .assert(pred_next_index_matches)
+            .assert(has_state_type)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = PeepholeTx::new_ruleset("hacker");
+
+        PeepholeTx::add_rule("hacker_is_even", ruleset, is_even_pat, |ctx, pat| {
+            ctx.insert_func_tbl(
+                "IsIsEven",
+                &[pat.e.to_value(&ctx.ctx).val, pat.x.to_value(&ctx.ctx).val],
+            );
+        });
+
+        PeepholeTx::add_rule(
+            "hacker_ntz_iterations",
+            ruleset,
+            ntz_iterations_pat,
+            |ctx, pat| {
+                ctx.insert_func_tbl(
+                    "NTZIterations",
+                    &[
+                        pat.outerif.to_value(&ctx.ctx).val,
+                        pat.n.to_value(&ctx.ctx).val,
+                        pat.lp_input_j.index.val,
+                    ],
+                );
+            },
+        );
+
+        PeepholeTx::add_rule("hacker_lowbit", ruleset, lowbit_pat, |ctx, pat| {
+            let neg_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Neg", &[]);
+            let neg_n = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Uop",
+                &[neg_op.0.val, pat.n.to_value(&ctx.ctx).val],
+            );
+            let bitand = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Bitand", &[]);
+            let lowbit = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Bop",
+                &[
+                    bitand.0.val,
+                    pat.n.to_value(&ctx.ctx).val,
+                    neg_n.to_value(&ctx.ctx).val,
+                ],
+            );
+            let div = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Div", &[]);
+            let ntz = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Bop",
+                &[
+                    div.0.val,
+                    pat.n.to_value(&ctx.ctx).val,
+                    lowbit.to_value(&ctx.ctx).val,
+                ],
+            );
+
+            ctx.union(pat.outer_j, lowbit);
+            ctx.union(pat.outer_i, ntz);
+        });
+
+        PeepholeTx::add_rule(
+            "hacker_loop_state_edge",
+            ruleset,
+            hacker_loop_state_edge_pat,
+            |ctx, pat| {
+                let j = ctx.devalue(pat.arg_j.index);
+                let j_val = ctx._intern_base::<i64, i64>(j);
+                let j_plus_one = ctx._intern_base::<i64, i64>(j + 1);
+
+                let new_lp_inputs = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.lpinputs.to_value(&ctx.ctx).val, j_val],
+                );
+                let new_pred_outputs = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.pred_outputs.to_value(&ctx.ctx).val, j_plus_one],
+                );
+                let new_loop_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "DummyLoopContext",
+                    &[
+                        new_lp_inputs.to_value(&ctx.ctx).val,
+                        new_pred_outputs.to_value(&ctx.ctx).val,
+                        pat.pred_outputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_body = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "DropAt",
+                    &[
+                        new_loop_ctx.to_value(&ctx.ctx).val,
+                        j_val,
+                        new_pred_outputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let loop_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InLoop",
+                    &[
+                        new_lp_inputs.to_value(&ctx.ctx).val,
+                        new_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(new_loop_ctx, loop_ctx);
+
+                let new_loop = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "DoWhile",
+                    &[
+                        new_lp_inputs.to_value(&ctx.ctx).val,
+                        new_body.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let old_loop = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.thenbr.to_value(&ctx.ctx).val, j_val],
+                );
+                ctx.union(new_loop, old_loop);
+
+                let then_state = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[pat.thenbr.to_value(&ctx.ctx).val, j_val],
+                );
+                let input_state = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[pat.lpinputs.to_value(&ctx.ctx).val, j_val],
+                );
+                ctx.union(then_state, input_state);
+            },
+        );
+
+        ruleset
+    }
+}

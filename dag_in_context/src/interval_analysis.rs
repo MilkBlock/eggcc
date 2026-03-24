@@ -13,8 +13,8 @@ fn int_interval_test(
     let with_arg_types = inp.clone().with_arg_types(emptyt(), expected_ty.clone());
     let check = format!(
         "
-    (check (lo-bound {with_arg_types}) (IntB {lo}))
-    (check (hi-bound {with_arg_types}) (IntB {hi}))
+    (check (lo_bound {with_arg_types}) (IntB {lo}))
+    (check (hi_bound {with_arg_types}) (IntB {hi}))
     "
     );
     interval_test(with_arg_types, expected_ty, arg, expected_val, check)
@@ -32,8 +32,8 @@ fn bool_interval_test(
     let with_arg_types = inp.clone().with_arg_types(emptyt(), expected_ty.clone());
     let check = format!(
         "
-    (check (lo-bound {with_arg_types}) (BoolB {lo}))
-    (check (hi-bound {with_arg_types}) (BoolB {hi}))
+    (check (lo_bound {with_arg_types}) (BoolB {lo}))
+    (check (hi_bound {with_arg_types}) (BoolB {hi}))
     "
     );
     interval_test(with_arg_types, expected_ty, arg, expected_val, check)
@@ -135,8 +135,8 @@ fn if_interval() -> crate::Result {
         &format!("{f}"),
         &format!(
             "
-        (check (lo-bound {e}) (IntB 4))
-        (check (hi-bound {e}) (IntB 5))
+        (check (lo_bound {e}) (IntB 4))
+        (check (hi_bound {e}) (IntB 5))
         "
         ),
         vec![f.to_program(base(intt()), base(intt()))],
@@ -168,10 +168,10 @@ fn nested_if() -> crate::Result {
         &format!("{f}"),
         &format!(
             "
-        (check (lo-bound {inner}) (IntB 4))
-        (check (hi-bound {inner}) (IntB 5))
-        (check (lo-bound {outer}) (IntB 20))
-        (check (hi-bound {outer}) (IntB 20))"
+        (check (lo_bound {inner}) (IntB 4))
+        (check (hi_bound {inner}) (IntB 5))
+        (check (lo_bound {outer}) (IntB 20))
+        (check (hi_bound {outer}) (IntB 20))"
         ),
         vec![f.to_program(base(intt()), base(intt()))],
         intv(2),
@@ -186,7 +186,7 @@ fn context_if() -> crate::Result {
     let cond = less_eq(iarg(), int_ty(0, base(intt())));
 
     // y = if cond {-1 * input} else {input}
-    // interval analysis should tell us that y is always positive (= (lo-bound y) (IntB 0))
+    // interval analysis should tell us that y is always positive (= (lo_bound y) (IntB 0))
     let y = tif(cond, parallel!(arg()), mul(getat(0), int(-1)), getat(0));
 
     // z = y < 0
@@ -232,7 +232,7 @@ fn context_if_rev() -> crate::Result {
     let cond = less_eq(int_ty(0, base(intt())), iarg());
 
     // y = if cond {-1 * input} else {input}
-    // interval analysis should tell us that y is always negative (= (hi-bound y) (IntB 0))
+    // interval analysis should tell us that y is always negative (= (hi_bound y) (IntB 0))
     let y = tif(cond, parallel!(iarg()), mul(getat(0), int(-1)), getat(0));
 
     // z = 0 < y

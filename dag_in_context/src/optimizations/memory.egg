@@ -293,8 +293,8 @@
            (AddIntIntervalToPtrPointees
              (MkIntInterval (I lo) (I hi))
              (UnwrapPtrPointsTo (PointsToCells x aps))))
-         :when ((= (IntB lo) (lo-bound e))
-                (= (IntB hi) (hi-bound e)))
+         :when ((= (IntB lo) (lo_bound e))
+                (= (IntB hi) (hi_bound e)))
          :ruleset memory-helpers)
 
 (rewrite (PointsToCells (If c inputs t e) aps)

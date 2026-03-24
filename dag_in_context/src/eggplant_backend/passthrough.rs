@@ -1,14 +1,19 @@
 pub(crate) fn fragment() -> String {
     let mut out = String::new();
     out.push_str(GENERATED_MARKER);
-    out.push_str(PASSTHROUGH);
+    out.push_str(PASSTHROUGH_RULES);
     out.push('\n');
     out
 }
 
+#[cfg(feature = "eggplant")]
+pub(crate) fn state_edge_fragment() -> String {
+    String::new()
+}
+
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/passthrough.rs)\n";
-const PASSTHROUGH: &str = r#"(ruleset passthrough)
+const PASSTHROUGH_RULES: &str = r#"(ruleset passthrough)
 
 
 ;; Pass through thetas
@@ -119,3 +124,553 @@ const PASSTHROUGH: &str = r#"(ruleset passthrough)
        (union (TupleRemoveAt if i) new_if)
        (ToSubsumeIf pred inputs then_ else_))
       :ruleset passthrough)"#;
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::insert_call;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_fact, AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+    };
+
+    fn type_leaf<PR: PatRecSgl>() -> schema_dsl::Type<PR> {
+        schema_dsl::Type::query_leaf()
+    }
+
+    fn state_type<PR: PatRecSgl>() -> schema_dsl::Type<PR, schema_dsl::BaseTy> {
+        schema_dsl::Base::query(&schema_dsl::StateT::query())
+    }
+
+    fn arg_expr<PR: PatRecSgl>() -> schema_dsl::Expr<PR, schema_dsl::ArgTy> {
+        schema_dsl::Arg::query(&type_leaf(), &schema_dsl::Assumption::query_leaf())
+    }
+
+    fn bool_const<PR: PatRecSgl>(
+        value: bool,
+    ) -> (
+        schema_dsl::Expr<PR, schema_dsl::ConstTy>,
+        eggplant::wrap::EqConstraint<bool, bool>,
+    ) {
+        let bool_value = schema_dsl::Bool::query();
+        let value_matches = bool_value.handle_value().eq(&value);
+        let const_expr = schema_dsl::Const::query(
+            &bool_value,
+            &type_leaf(),
+            &schema_dsl::Assumption::query_leaf(),
+        );
+        (const_expr, value_matches)
+    }
+
+    #[eggplant::pat_vars]
+    struct LoopThetaPat<PR: PatRecSgl> {
+        inputs: schema_dsl::Expr,
+        lhs: schema_dsl::Get,
+    }
+
+    fn loop_theta_pat<PR: PatRecSgl>() -> LoopThetaPat<PR> {
+        let inputs = schema_dsl::Expr::query_leaf();
+        let pred_outputs = schema_dsl::Expr::query_leaf();
+        let loop_expr = schema_dsl::DoWhile::query(&inputs, &pred_outputs);
+        let lhs = schema_dsl::Get::query(&loop_expr);
+        let body_out = schema_dsl::Get::query(&pred_outputs);
+        let arg_out = schema_dsl::Get::query(&arg_expr::<PR>());
+        let lhs_ty = type_leaf::<PR>();
+        let body_index_matches = body_out
+            .handle_index()
+            .eq(&(lhs.handle_index() + (&1_i64).as_handle()));
+        let arg_index_matches = arg_out.handle_index().eq(&lhs.handle_index());
+        let same_body_value = body_out.handle().eq(&arg_out.handle());
+        let has_type = prim_fact(
+            "HasType",
+            vec![
+                lhs.handle().into_handle_ty(),
+                lhs_ty.handle().into_handle_ty(),
+            ],
+        );
+        let pure_type = prim_fact("PureType", vec![lhs_ty.handle().into_handle_ty()]);
+
+        LoopThetaPat::new(inputs, lhs)
+            .assert(body_index_matches)
+            .assert(arg_index_matches)
+            .assert(same_body_value)
+            .assert(has_type)
+            .assert(pure_type)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchArgPat<PR: PatRecSgl> {
+        inputs: schema_dsl::Expr,
+        arg0_out: schema_dsl::Get,
+        lhs: schema_dsl::Get,
+    }
+
+    fn switch_arg_pat<PR: PatRecSgl>() -> SwitchArgPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let branch0 = schema_dsl::Expr::query_leaf();
+        let branch1 = schema_dsl::Expr::query_leaf();
+        let nil = schema_dsl::Nil::query();
+        let tail = schema_dsl::Cons::query(&branch1, &nil);
+        let branches = schema_dsl::Cons::query(&branch0, &tail);
+        let switch = schema_dsl::Switch::query(&pred, &inputs, &branches);
+        let lhs = schema_dsl::Get::query(&switch);
+        let branch0_out = schema_dsl::Get::query(&branch0);
+        let branch1_out = schema_dsl::Get::query(&branch1);
+        let arg_ty = schema_dsl::Type::query_leaf();
+        let ctx0 = schema_dsl::Assumption::query_leaf();
+        let ctx1 = schema_dsl::Assumption::query_leaf();
+        let arg0 = schema_dsl::Arg::query(&arg_ty, &ctx0);
+        let arg1 = schema_dsl::Arg::query(&arg_ty, &ctx1);
+        let arg0_out = schema_dsl::Get::query(&arg0);
+        let arg1_out = schema_dsl::Get::query(&arg1);
+        let lhs_ty = type_leaf::<PR>();
+        let same_branch0_index = branch0_out.handle_index().eq(&lhs.handle_index());
+        let same_branch1_index = branch1_out.handle_index().eq(&lhs.handle_index());
+        let same_arg_index = arg0_out.handle_index().eq(&arg1_out.handle_index());
+        let same_branch0_value = branch0_out.handle().eq(&arg0_out.handle());
+        let same_branch1_value = branch1_out.handle().eq(&arg1_out.handle());
+        let has_type = prim_fact(
+            "HasType",
+            vec![
+                lhs.handle().into_handle_ty(),
+                lhs_ty.handle().into_handle_ty(),
+            ],
+        );
+        let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
+
+        SwitchArgPat::new(inputs, arg0_out, lhs)
+            .assert(same_branch0_index)
+            .assert(same_branch1_index)
+            .assert(same_arg_index)
+            .assert(same_branch0_value)
+            .assert(same_branch1_value)
+            .assert(has_type)
+            .assert(is_not_state)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwitchPredicatePat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        lhs: schema_dsl::Get,
+    }
+
+    fn switch_predicate_pat<PR: PatRecSgl>() -> SwitchPredicatePat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let branch0 = schema_dsl::Expr::query_leaf();
+        let branch1 = schema_dsl::Expr::query_leaf();
+        let nil = schema_dsl::Nil::query();
+        let tail = schema_dsl::Cons::query(&branch1, &nil);
+        let branches = schema_dsl::Cons::query(&branch0, &tail);
+        let switch = schema_dsl::Switch::query(&pred, &inputs, &branches);
+        let lhs = schema_dsl::Get::query(&switch);
+        let branch0_out = schema_dsl::Get::query(&branch0);
+        let branch1_out = schema_dsl::Get::query(&branch1);
+        let (false_const, false_matches_value) = bool_const::<PR>(false);
+        let (true_const, true_matches_value) = bool_const::<PR>(true);
+        let same_branch0_index = branch0_out.handle_index().eq(&lhs.handle_index());
+        let same_branch1_index = branch1_out.handle_index().eq(&lhs.handle_index());
+        let branch0_is_false = branch0_out.handle().eq(&false_const.handle());
+        let branch1_is_true = branch1_out.handle().eq(&true_const.handle());
+
+        SwitchPredicatePat::new(pred, lhs)
+            .assert(same_branch0_index)
+            .assert(same_branch1_index)
+            .assert(branch0_is_false)
+            .assert(false_matches_value)
+            .assert(branch1_is_true)
+            .assert(true_matches_value)
+    }
+
+    #[eggplant::pat_vars]
+    struct IfArgPat<PR: PatRecSgl> {
+        inputs: schema_dsl::Expr,
+        then_arg_out: schema_dsl::Get,
+        lhs: schema_dsl::Get,
+    }
+
+    fn if_arg_pat<PR: PatRecSgl>() -> IfArgPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+        let lhs = schema_dsl::Get::query(&if_expr);
+        let then_branch = schema_dsl::Get::query(&then_);
+        let else_branch = schema_dsl::Get::query(&else_);
+        let arg_ty = schema_dsl::Type::query_leaf();
+        let then_ctx = schema_dsl::Assumption::query_leaf();
+        let else_ctx = schema_dsl::Assumption::query_leaf();
+        let then_arg = schema_dsl::Arg::query(&arg_ty, &then_ctx);
+        let else_arg = schema_dsl::Arg::query(&arg_ty, &else_ctx);
+        let then_arg_out = schema_dsl::Get::query(&then_arg);
+        let else_arg_out = schema_dsl::Get::query(&else_arg);
+        let lhs_ty = type_leaf::<PR>();
+        let same_then_index = then_branch.handle_index().eq(&lhs.handle_index());
+        let same_else_index = else_branch.handle_index().eq(&lhs.handle_index());
+        let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
+        let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
+        let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
+        let has_type = prim_fact(
+            "HasType",
+            vec![
+                then_branch.handle().into_handle_ty(),
+                lhs_ty.handle().into_handle_ty(),
+            ],
+        );
+        let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
+
+        IfArgPat::new(inputs, then_arg_out, lhs)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(same_arg_index)
+            .assert(same_then_value)
+            .assert(same_else_value)
+            .assert(has_type)
+            .assert(is_not_state)
+    }
+
+    #[eggplant::pat_vars]
+    struct IfStateEdgePat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        then_: schema_dsl::Expr,
+        else_: schema_dsl::Expr,
+        outputs: schema_dsl::If,
+        then_arg_out: schema_dsl::Get,
+        lhs: schema_dsl::Get,
+    }
+
+    fn if_state_edge_pat<PR: PatRecSgl>() -> IfStateEdgePat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let outputs = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+        let lhs = schema_dsl::Get::query(&outputs);
+        let then_branch = schema_dsl::Get::query(&then_);
+        let else_branch = schema_dsl::Get::query(&else_);
+        let arg_ty = schema_dsl::Type::query_leaf();
+        let then_ctx = schema_dsl::Assumption::query_leaf();
+        let else_ctx = schema_dsl::Assumption::query_leaf();
+        let then_arg = schema_dsl::Arg::query(&arg_ty, &then_ctx);
+        let else_arg = schema_dsl::Arg::query(&arg_ty, &else_ctx);
+        let then_arg_out = schema_dsl::Get::query(&then_arg);
+        let else_arg_out = schema_dsl::Get::query(&else_arg);
+        let same_then_index = then_branch.handle_index().eq(&lhs.handle_index());
+        let same_else_index = else_branch.handle_index().eq(&lhs.handle_index());
+        let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
+        let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
+        let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
+        let has_state_type = prim_fact(
+            "HasType",
+            vec![
+                then_branch.handle().into_handle_ty(),
+                state_type::<PR>().handle().into_handle_ty(),
+            ],
+        );
+
+        IfStateEdgePat::new(pred, inputs, then_, else_, outputs, then_arg_out, lhs)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(same_arg_index)
+            .assert(same_then_value)
+            .assert(same_else_value)
+            .assert(has_state_type)
+    }
+
+    #[eggplant::pat_vars]
+    struct IfPredicatePat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        then_: schema_dsl::Expr,
+        else_: schema_dsl::Expr,
+        if_expr: schema_dsl::If,
+        lhs: schema_dsl::Get,
+    }
+
+    fn if_predicate_pat<PR: PatRecSgl>() -> IfPredicatePat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+        let lhs = schema_dsl::Get::query(&if_expr);
+        let then_out = schema_dsl::Get::query(&then_);
+        let else_out = schema_dsl::Get::query(&else_);
+        let (true_const, true_matches_value) = bool_const::<PR>(true);
+        let (false_const, false_matches_value) = bool_const::<PR>(false);
+        let same_then_index = then_out.handle_index().eq(&lhs.handle_index());
+        let same_else_index = else_out.handle_index().eq(&lhs.handle_index());
+        let then_is_true = then_out.handle().eq(&true_const.handle());
+        let else_is_false = else_out.handle().eq(&false_const.handle());
+
+        IfPredicatePat::new(pred, inputs, then_, else_, if_expr, lhs)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(then_is_true)
+            .assert(true_matches_value)
+            .assert(else_is_false)
+            .assert(false_matches_value)
+    }
+
+    #[eggplant::pat_vars]
+    struct IfPredicateInvertedPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        then_: schema_dsl::Expr,
+        else_: schema_dsl::Expr,
+        if_expr: schema_dsl::If,
+        lhs: schema_dsl::Get,
+    }
+
+    fn if_predicate_inverted_pat<PR: PatRecSgl>() -> IfPredicateInvertedPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+        let lhs = schema_dsl::Get::query(&if_expr);
+        let then_out = schema_dsl::Get::query(&then_);
+        let else_out = schema_dsl::Get::query(&else_);
+        let (false_const, false_matches_value) = bool_const::<PR>(false);
+        let (true_const, true_matches_value) = bool_const::<PR>(true);
+        let same_then_index = then_out.handle_index().eq(&lhs.handle_index());
+        let same_else_index = else_out.handle_index().eq(&lhs.handle_index());
+        let then_is_false = then_out.handle().eq(&false_const.handle());
+        let else_is_true = else_out.handle().eq(&true_const.handle());
+
+        IfPredicateInvertedPat::new(pred, inputs, then_, else_, if_expr, lhs)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(then_is_false)
+            .assert(false_matches_value)
+            .assert(else_is_true)
+            .assert(true_matches_value)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = PeepholeTx::new_ruleset("passthrough");
+        let state_edge_ruleset = PeepholeTx::new_ruleset("state-edge-passthrough");
+
+        PeepholeTx::add_rule(
+            "passthrough_loop_theta",
+            ruleset,
+            loop_theta_pat,
+            |ctx, pat| {
+                let passthrough = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[pat.inputs.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                ctx.union(pat.lhs, passthrough);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "passthrough_switch_arg",
+            ruleset,
+            switch_arg_pat,
+            |ctx, pat| {
+                let passthrough = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[pat.inputs.to_value(&ctx.ctx).val, pat.arg0_out.index.val],
+                );
+                ctx.union(pat.lhs, passthrough);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "passthrough_switch_predicate",
+            ruleset,
+            switch_predicate_pat,
+            |ctx, pat| {
+                ctx.union(pat.lhs, pat.pred);
+            },
+        );
+
+        PeepholeTx::add_rule("passthrough_if_arg", ruleset, if_arg_pat, |ctx, pat| {
+            let passthrough = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Get",
+                &[
+                    pat.inputs.to_value(&ctx.ctx).val,
+                    pat.then_arg_out.index.val,
+                ],
+            );
+            ctx.union(pat.lhs, passthrough);
+        });
+
+        PeepholeTx::add_rule(
+            "passthrough_if_state_edge",
+            state_edge_ruleset,
+            if_state_edge_pat,
+            |ctx, pat| {
+                let passthrough_index = pat.then_arg_out.index.val;
+                let output_index = pat.lhs.index.val;
+                let new_inputs = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.inputs.to_value(&ctx.ctx).val, passthrough_index],
+                );
+                let new_then_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        ctx._intern_base::<bool, bool>(true),
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_inputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_else_ctx = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        ctx._intern_base::<bool, bool>(false),
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_inputs.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let old_then = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.then_.to_value(&ctx.ctx).val, output_index],
+                );
+                let old_else = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.else_.to_value(&ctx.ctx).val, output_index],
+                );
+                let new_then = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "DropAt",
+                    &[
+                        new_then_ctx.to_value(&ctx.ctx).val,
+                        passthrough_index,
+                        old_then.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_else = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "DropAt",
+                    &[
+                        new_else_ctx.to_value(&ctx.ctx).val,
+                        passthrough_index,
+                        old_else.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let old_outputs = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.outputs.to_value(&ctx.ctx).val, output_index],
+                );
+                let new_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_inputs.to_value(&ctx.ctx).val,
+                        new_then.to_value(&ctx.ctx).val,
+                        new_else.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let passthrough = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[pat.inputs.to_value(&ctx.ctx).val, passthrough_index],
+                );
+
+                ctx.union(new_if, old_outputs);
+                ctx.union(pat.lhs, passthrough);
+                ctx.insert_func_tbl(
+                    "ToSubsumeIf",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.then_.to_value(&ctx.ctx).val,
+                        pat.else_.to_value(&ctx.ctx).val,
+                    ],
+                );
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "passthrough_if_predicate",
+            ruleset,
+            if_predicate_pat,
+            |ctx, pat| {
+                let new_then = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.then_.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                let new_else = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.else_.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                let new_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        new_then.to_value(&ctx.ctx).val,
+                        new_else.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let removed = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.if_expr.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                ctx.union(pat.lhs, pat.pred);
+                ctx.union(removed, new_if);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "passthrough_if_predicate_inverted",
+            ruleset,
+            if_predicate_inverted_pat,
+            |ctx, pat| {
+                let new_then = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.then_.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                let new_else = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.else_.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                let new_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        new_then.to_value(&ctx.ctx).val,
+                        new_else.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let removed = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TupleRemoveAt",
+                    &[pat.if_expr.to_value(&ctx.ctx).val, pat.lhs.index.val],
+                );
+                let not_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Not", &[]);
+                let inverted = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Uop",
+                    &[not_op.0.val, pat.pred.to_value(&ctx.ctx).val],
+                );
+                ctx.union(pat.lhs, inverted);
+                ctx.union(removed, new_if);
+            },
+        );
+
+        ruleset
+    }
+}

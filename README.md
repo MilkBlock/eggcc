@@ -41,3 +41,17 @@
 - Run `bash infra/localnightly.sh <bril file or directory>`
 
 To run the nightly server for an existing nightly, run `cd nightly/output && python3 -m http.server`.
+
+## CUDA Phase 0 demo
+- Accepted Phase 0 CUDA frontend examples live under `examples/cuda/phase0/`.
+- Fast path:
+  ```
+  cd ~/Repos/egg_related/eggcc_rlcr
+  scripts/phase0-cuda-demo.sh rvsdg-conversion
+  ```
+- VSCode debug launcher:
+  ```
+  cd ~/Repos/egg_related/eggcc_rlcr
+  ./dev-vscode.sh
+  ```
+- Full notes and direct commands: `docs/phase0_cuda_demo.md`

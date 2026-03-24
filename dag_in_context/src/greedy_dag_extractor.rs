@@ -342,8 +342,9 @@ pub fn serialized_egraph_native(
 ) -> std::result::Result<(egraph_serialize::EGraph, IndexSet<String>), String> {
     let config = eggplant::egglog::SerializeConfig::default();
     let native = egglog_egraph.serialize(config).egraph;
-    let json = serde_json::to_value(native)
-        .map_err(|err| format!("failed to serialize eggplant-native egraph to JSON value: {err}"))?;
+    let json = serde_json::to_value(native).map_err(|err| {
+        format!("failed to serialize eggplant-native egraph to JSON value: {err}")
+    })?;
     let egraph = serde_json::from_value(json).map_err(|err| {
         format!("failed to convert eggplant-native serialized egraph into local schema: {err}")
     })?;

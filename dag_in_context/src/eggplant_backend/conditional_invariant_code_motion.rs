@@ -6,8 +6,24 @@ pub(crate) fn fragment() -> String {
     out
 }
 
+#[cfg(feature = "eggplant")]
+pub(crate) fn native_fragment() -> String {
+    let mut out = String::new();
+    out.push_str(GENERATED_MARKER);
+    out.push_str(CONDITIONAL_INVARIANT_CODE_MOTION_SUPPORT);
+    out.push('\n');
+    out
+}
+
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/conditional_invariant_code_motion.rs)\n";
+const CONDITIONAL_INVARIANT_CODE_MOTION_SUPPORT: &str = r#"(ruleset cicm)
+(ruleset cicm-index)
+
+(relation InvCodeMotionCandidate (Expr Expr))
+
+;; speeds up the InvCodeMotionCandidate relation by removing indirection
+(relation ExtractedExprCache (Term Expr Assumption))"#;
 const CONDITIONAL_INVARIANT_CODE_MOTION: &str = r#"(ruleset cicm)
 (ruleset cicm-index)
 
@@ -170,3 +186,1044 @@ const CONDITIONAL_INVARIANT_CODE_MOTION: &str = r#"(ruleset cicm)
         (union if_e (If pred new_ins new_thn new_els))
       )
     :ruleset cicm)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::insert_call;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
+        RuleRunnerSgl, RuleSetId,
+    };
+    use eggplant::wrap::EgglogTy;
+
+    #[derive(Clone, Copy, Debug)]
+    struct TermAndCostTy;
+
+    impl EgglogTy for TermAndCostTy {
+        const TY_NAME: &'static str = "TermAndCost";
+        const TY_NAME_LOWER: &'static str = "term_and_cost";
+        type Valued = eggplant::wrap::Value<Self>;
+        type EnumVariantMarker = ();
+    }
+
+    #[eggplant::pat_vars]
+    struct CicmIndexExtractedExprCachePat<PR: PatRecSgl> {
+        t1: schema_dsl::Term,
+        e1: schema_dsl::Expr,
+        ctx1: schema_dsl::Assumption,
+    }
+
+    fn cicm_index_extracted_expr_cache_pat<PR: PatRecSgl>() -> CicmIndexExtractedExprCachePat<PR> {
+        let t1 = schema_dsl::Term::query_leaf();
+        let e1 = schema_dsl::Expr::query_leaf();
+        let ctx1 = schema_dsl::Assumption::query_leaf();
+        let c1 = BaseVar::<i64, PR>::query_named("c1");
+
+        let extracted_expr = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![e1.handle().into_handle_ty()],
+        ));
+        let context_of = prim_fact(
+            "ContextOf",
+            vec![e1.handle().into_handle_ty(), ctx1.handle().into_handle_ty()],
+        );
+
+        CicmIndexExtractedExprCachePat::new(t1, e1, ctx1)
+            .assert(extracted_expr)
+            .assert(context_of)
+    }
+
+    #[eggplant::pat_vars]
+    struct CicmIndexCandidatePat<PR: PatRecSgl> {
+        t1: schema_dsl::Term,
+        e1: schema_dsl::Expr,
+        e2: schema_dsl::Expr,
+        pred1: schema_dsl::Expr,
+        pred2: schema_dsl::Expr,
+        orig_ins3: schema_dsl::Expr,
+        orig_ins4: schema_dsl::Expr,
+    }
+
+    fn cicm_index_candidate_pat<PR: PatRecSgl>() -> CicmIndexCandidatePat<PR> {
+        let t1 = schema_dsl::Term::query_leaf();
+        let e1 = schema_dsl::Expr::query_leaf();
+        let e2 = schema_dsl::Expr::query_leaf();
+        let pred1 = schema_dsl::Expr::query_leaf();
+        let pred2 = schema_dsl::Expr::query_leaf();
+        let orig_ins3 = schema_dsl::Expr::query_leaf();
+        let orig_ins4 = schema_dsl::Expr::query_leaf();
+        let true_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).as_handle().into_handle_ty(),
+                pred1.handle().into_handle_ty(),
+                orig_ins3.handle().into_handle_ty(),
+            ],
+        );
+        let false_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).as_handle().into_handle_ty(),
+                pred2.handle().into_handle_ty(),
+                orig_ins4.handle().into_handle_ty(),
+            ],
+        );
+        let true_branch_cache = prim_fact(
+            "ExtractedExprCache",
+            vec![
+                t1.handle().into_handle_ty(),
+                e1.handle().into_handle_ty(),
+                true_if_ctx.into_handle_ty(),
+            ],
+        );
+        let false_branch_cache = prim_fact(
+            "ExtractedExprCache",
+            vec![
+                t1.handle().into_handle_ty(),
+                e2.handle().into_handle_ty(),
+                false_if_ctx.into_handle_ty(),
+            ],
+        );
+        let distinct_exprs = e1.handle().ne(&e2.handle());
+
+        CicmIndexCandidatePat::new(t1, e1, e2, pred1, pred2, orig_ins3, orig_ins4)
+            .assert(true_branch_cache)
+            .assert(false_branch_cache)
+            .assert(distinct_exprs)
+    }
+
+    #[eggplant::pat_vars]
+    struct CicmUopPat<PR: PatRecSgl> {
+        if_e: schema_dsl::Expr,
+        pred: schema_dsl::Expr,
+        orig_ins: schema_dsl::Expr,
+        thn: schema_dsl::Expr,
+        els: schema_dsl::Expr,
+        outer_ctx: schema_dsl::Assumption,
+        tylist: schema_dsl::TypeList,
+        ty: schema_dsl::BaseType,
+        e1: schema_dsl::Expr,
+        e2: schema_dsl::Expr,
+        op: schema_dsl::UnaryOp,
+        x: schema_dsl::Expr,
+        y: schema_dsl::Expr,
+        t1: schema_dsl::Term,
+    }
+
+    fn cicm_uop_pat<PR: PatRecSgl>() -> CicmUopPat<PR> {
+        let if_e = schema_dsl::Expr::query_leaf();
+        let pred = schema_dsl::Expr::query_leaf();
+        let orig_ins = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let outer_ctx = schema_dsl::Assumption::query_leaf();
+        let tylist = schema_dsl::TypeList::query_leaf();
+        let ty = schema_dsl::BaseType::query_leaf();
+        let e1 = schema_dsl::Expr::query_leaf();
+        let e2 = schema_dsl::Expr::query_leaf();
+        let op = schema_dsl::UnaryOp::query_leaf();
+        let x = schema_dsl::Expr::query_leaf();
+        let y = schema_dsl::Expr::query_leaf();
+        let t1 = schema_dsl::Term::query_leaf();
+        let size1 = BaseVar::<i64, PR>::query_named("size1");
+        let size2 = BaseVar::<i64, PR>::query_named("size2");
+        let c1 = BaseVar::<i64, PR>::query_named("c1");
+        let c2 = BaseVar::<i64, PR>::query_named("c2");
+
+        let tuple_ty = schema_dsl::TupleT::query(&tylist);
+        let base_ty = schema_dsl::Base::query(&ty);
+        let true_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).as_handle().into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                orig_ins.handle().into_handle_ty(),
+            ],
+        );
+        let false_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).as_handle().into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                orig_ins.handle().into_handle_ty(),
+            ],
+        );
+
+        let if_match = if_e
+            .handle()
+            .eq(&schema_dsl::If::query(&pred, &orig_ins, &thn, &els).handle());
+        let then_has_arg_type = prim_fact(
+            "HasArgType",
+            vec![
+                thn.handle().into_handle_ty(),
+                tuple_ty.handle().into_handle_ty(),
+            ],
+        );
+        let else_has_arg_type = prim_fact(
+            "HasArgType",
+            vec![
+                els.handle().into_handle_ty(),
+                tuple_ty.handle().into_handle_ty(),
+            ],
+        );
+        let if_context = prim_fact(
+            "ContextOf",
+            vec![
+                if_e.handle().into_handle_ty(),
+                outer_ctx.handle().into_handle_ty(),
+            ],
+        );
+        let e1_match = e1.handle().eq(&schema_dsl::Uop::query(&op, &x).handle());
+        let e1_has_type = prim_fact(
+            "HasType",
+            vec![
+                e1.handle().into_handle_ty(),
+                base_ty.handle().into_handle_ty(),
+            ],
+        );
+        let e1_size = size1
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![e1.handle().into_handle_ty()]));
+        let e1_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size1.handle().into_handle_ty(),
+            ],
+        );
+        let e1_pure = prim_fact("ExprIsPure", vec![e1.handle().into_handle_ty()]);
+        let e1_context = prim_fact(
+            "ContextOf",
+            vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
+        );
+        let e1_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![e1.handle().into_handle_ty()],
+        ));
+        let e2_match = e2.handle().eq(&schema_dsl::Uop::query(&op, &y).handle());
+        let e2_has_type = prim_fact(
+            "HasType",
+            vec![
+                e2.handle().into_handle_ty(),
+                base_ty.handle().into_handle_ty(),
+            ],
+        );
+        let e2_size = size2
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![e2.handle().into_handle_ty()]));
+        let e2_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size2.handle().into_handle_ty(),
+            ],
+        );
+        let e2_pure = prim_fact("ExprIsPure", vec![e2.handle().into_handle_ty()]);
+        let e2_context = prim_fact(
+            "ContextOf",
+            vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
+        );
+        let e2_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c2.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![e2.handle().into_handle_ty()],
+        ));
+
+        CicmUopPat::new(
+            if_e, pred, orig_ins, thn, els, outer_ctx, tylist, ty, e1, e2, op, x, y, t1,
+        )
+        .assert(if_match)
+        .assert(then_has_arg_type)
+        .assert(else_has_arg_type)
+        .assert(if_context)
+        .assert(e1_match)
+        .assert(e1_has_type)
+        .assert(e1_size)
+        .assert(e1_small)
+        .assert(e1_pure)
+        .assert(e1_context)
+        .assert(e1_extracted)
+        .assert(e2_match)
+        .assert(e2_has_type)
+        .assert(e2_size)
+        .assert(e2_small)
+        .assert(e2_pure)
+        .assert(e2_context)
+        .assert(e2_extracted)
+    }
+
+    #[eggplant::pat_vars]
+    struct CicmBopPat<PR: PatRecSgl> {
+        if_e: schema_dsl::Expr,
+        pred: schema_dsl::Expr,
+        orig_ins: schema_dsl::Expr,
+        thn: schema_dsl::Expr,
+        els: schema_dsl::Expr,
+        outer_ctx: schema_dsl::Assumption,
+        tylist: schema_dsl::TypeList,
+        ty: schema_dsl::BaseType,
+        e1: schema_dsl::Expr,
+        e2: schema_dsl::Expr,
+        op: schema_dsl::BinaryOp,
+        x1: schema_dsl::Expr,
+        y1: schema_dsl::Expr,
+        x2: schema_dsl::Expr,
+        y2: schema_dsl::Expr,
+        t1: schema_dsl::Term,
+    }
+
+    fn cicm_bop_pat<PR: PatRecSgl>() -> CicmBopPat<PR> {
+        let if_e = schema_dsl::Expr::query_leaf();
+        let pred = schema_dsl::Expr::query_leaf();
+        let orig_ins = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let outer_ctx = schema_dsl::Assumption::query_leaf();
+        let tylist = schema_dsl::TypeList::query_leaf();
+        let ty = schema_dsl::BaseType::query_leaf();
+        let e1 = schema_dsl::Expr::query_leaf();
+        let e2 = schema_dsl::Expr::query_leaf();
+        let op = schema_dsl::BinaryOp::query_leaf();
+        let x1 = schema_dsl::Expr::query_leaf();
+        let y1 = schema_dsl::Expr::query_leaf();
+        let x2 = schema_dsl::Expr::query_leaf();
+        let y2 = schema_dsl::Expr::query_leaf();
+        let t1 = schema_dsl::Term::query_leaf();
+        let size1 = BaseVar::<i64, PR>::query_named("size1");
+        let size2 = BaseVar::<i64, PR>::query_named("size2");
+        let c1 = BaseVar::<i64, PR>::query_named("c1");
+        let c2 = BaseVar::<i64, PR>::query_named("c2");
+
+        let tuple_ty = schema_dsl::TupleT::query(&tylist);
+        let base_ty = schema_dsl::Base::query(&ty);
+        let true_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&true).as_handle().into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                orig_ins.handle().into_handle_ty(),
+            ],
+        );
+        let false_if_ctx = prim_call::<schema_dsl::Assumption>(
+            "InIf",
+            vec![
+                (&false).as_handle().into_handle_ty(),
+                pred.handle().into_handle_ty(),
+                orig_ins.handle().into_handle_ty(),
+            ],
+        );
+
+        let inv_candidate = prim_fact(
+            "InvCodeMotionCandidate",
+            vec![e1.handle().into_handle_ty(), e2.handle().into_handle_ty()],
+        );
+        let if_match = if_e
+            .handle()
+            .eq(&schema_dsl::If::query(&pred, &orig_ins, &thn, &els).handle());
+        let then_has_arg_type = prim_fact(
+            "HasArgType",
+            vec![
+                thn.handle().into_handle_ty(),
+                tuple_ty.handle().into_handle_ty(),
+            ],
+        );
+        let else_has_arg_type = prim_fact(
+            "HasArgType",
+            vec![
+                els.handle().into_handle_ty(),
+                tuple_ty.handle().into_handle_ty(),
+            ],
+        );
+        let if_context = prim_fact(
+            "ContextOf",
+            vec![
+                if_e.handle().into_handle_ty(),
+                outer_ctx.handle().into_handle_ty(),
+            ],
+        );
+        let e1_context = prim_fact(
+            "ContextOf",
+            vec![e1.handle().into_handle_ty(), true_if_ctx.into_handle_ty()],
+        );
+        let e2_context = prim_fact(
+            "ContextOf",
+            vec![e2.handle().into_handle_ty(), false_if_ctx.into_handle_ty()],
+        );
+        let e1_match = e1
+            .handle()
+            .eq(&schema_dsl::Bop::query(&op, &x1, &y1).handle());
+        let e2_match = e2
+            .handle()
+            .eq(&schema_dsl::Bop::query(&op, &x2, &y2).handle());
+        let e1_has_type = prim_fact(
+            "HasType",
+            vec![
+                e1.handle().into_handle_ty(),
+                base_ty.handle().into_handle_ty(),
+            ],
+        );
+        let e2_has_type = prim_fact(
+            "HasType",
+            vec![
+                e2.handle().into_handle_ty(),
+                base_ty.handle().into_handle_ty(),
+            ],
+        );
+        let e1_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![e1.handle().into_handle_ty()],
+        ));
+        let e2_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c2.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![e2.handle().into_handle_ty()],
+        ));
+        let e1_size = size1
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![e1.handle().into_handle_ty()]));
+        let e2_size = size2
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![e2.handle().into_handle_ty()]));
+        let e1_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size1.handle().into_handle_ty(),
+            ],
+        );
+        let e2_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size2.handle().into_handle_ty(),
+            ],
+        );
+        let e1_pure = prim_fact("ExprIsPure", vec![e1.handle().into_handle_ty()]);
+        let e2_pure = prim_fact("ExprIsPure", vec![e2.handle().into_handle_ty()]);
+
+        CicmBopPat::new(
+            if_e, pred, orig_ins, thn, els, outer_ctx, tylist, ty, e1, e2, op, x1, y1, x2, y2, t1,
+        )
+        .assert(inv_candidate)
+        .assert(if_match)
+        .assert(then_has_arg_type)
+        .assert(else_has_arg_type)
+        .assert(if_context)
+        .assert(e1_context)
+        .assert(e2_context)
+        .assert(e1_match)
+        .assert(e2_match)
+        .assert(e1_has_type)
+        .assert(e2_has_type)
+        .assert(e1_extracted)
+        .assert(e2_extracted)
+        .assert(e1_size)
+        .assert(e2_size)
+        .assert(e1_small)
+        .assert(e2_small)
+        .assert(e1_pure)
+        .assert(e2_pure)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = RuleSetId("cicm");
+        let index_ruleset = RuleSetId("cicm-index");
+
+        PeepholeTx::add_rule(
+            "conditional_invariant_code_motion_index_extracted_expr_cache",
+            index_ruleset,
+            cicm_index_extracted_expr_cache_pat,
+            |ctx, pat| {
+                ctx.insert_func_tbl(
+                    "ExtractedExprCache",
+                    &[
+                        pat.t1.to_value(&ctx.ctx).val,
+                        pat.e1.to_value(&ctx.ctx).val,
+                        pat.ctx1.to_value(&ctx.ctx).val,
+                    ],
+                );
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "conditional_invariant_code_motion_index_candidates",
+            index_ruleset,
+            cicm_index_candidate_pat,
+            |ctx, pat| {
+                ctx.insert_func_tbl(
+                    "InvCodeMotionCandidate",
+                    &[pat.e1.to_value(&ctx.ctx).val, pat.e2.to_value(&ctx.ctx).val],
+                );
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "conditional_invariant_code_motion_uop",
+            ruleset,
+            cicm_uop_pat,
+            |ctx, pat| {
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let orig_ins_len =
+                    ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx.ctx).val]);
+
+                let new_term = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TermSubst",
+                    &[
+                        pat.outer_ctx.to_value(&ctx.ctx).val,
+                        pat.orig_ins.to_value(&ctx.ctx).val,
+                        pat.t1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_ins = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Concat",
+                    &[
+                        pat.orig_ins.to_value(&ctx.ctx).val,
+                        insert_call::<schema_dsl::Expr>(
+                            &ctx.ctx,
+                            "Single",
+                            &[new_term.to_value(&ctx.ctx).val],
+                        )
+                        .to_value(&ctx.ctx)
+                        .val,
+                    ],
+                );
+
+                let tnil = insert_call::<schema_dsl::TypeList>(&ctx.ctx, "TNil", &[]);
+                let appended_tail = insert_call::<schema_dsl::TypeList>(
+                    &ctx.ctx,
+                    "TCons",
+                    &[pat.ty.to_value(&ctx.ctx).val, tnil.0.val],
+                );
+                let new_tylist = insert_call::<schema_dsl::TypeList>(
+                    &ctx.ctx,
+                    "TLConcat",
+                    &[
+                        pat.tylist.to_value(&ctx.ctx).val,
+                        appended_tail.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_ins_ty =
+                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_tylist.0.val]);
+
+                let if_tr = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        true.to_value(&ctx.ctx).val,
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let if_fa = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        false.to_value(&ctx.ctx).val,
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let arg_tr = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        new_ins_ty.to_value(&ctx.ctx).val,
+                        if_tr.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let arg_fa = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        new_ins_ty.to_value(&ctx.ctx).val,
+                        if_fa.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let st_tr = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "SubTuple",
+                    &[arg_tr.to_value(&ctx.ctx).val, zero, orig_ins_len],
+                );
+                let st_fa = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "SubTuple",
+                    &[arg_fa.to_value(&ctx.ctx).val, zero, orig_ins_len],
+                );
+                let new_thn = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.thn.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_els = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.els.to_value(&ctx.ctx).val,
+                    ],
+                );
+
+                let pulled_in_true = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[arg_tr.to_value(&ctx.ctx).val, orig_ins_len],
+                );
+                let pulled_in_false = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[arg_fa.to_value(&ctx.ctx).val, orig_ins_len],
+                );
+                let subst_e1 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.e1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_e2 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.e2.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pulled_in_true, subst_e1);
+                ctx.union(pulled_in_false, subst_e2);
+
+                let subst_x = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.x.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_y = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.y.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let _ = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Uop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let _ = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Uop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_y.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.subsume(
+                    "Uop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.subsume(
+                    "Uop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_y.to_value(&ctx.ctx).val,
+                    ],
+                );
+
+                let new_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                        new_thn.to_value(&ctx.ctx).val,
+                        new_els.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pat.if_e, new_if);
+            },
+        );
+
+        PeepholeTx::add_rule(
+            "conditional_invariant_code_motion_bop",
+            ruleset,
+            cicm_bop_pat,
+            |ctx, pat| {
+                let zero = ctx._intern_base::<i64, i64>(0);
+                let orig_ins_len =
+                    ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx.ctx).val]);
+
+                let new_term = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "TermSubst",
+                    &[
+                        pat.outer_ctx.to_value(&ctx.ctx).val,
+                        pat.orig_ins.to_value(&ctx.ctx).val,
+                        pat.t1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_ins = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Concat",
+                    &[
+                        pat.orig_ins.to_value(&ctx.ctx).val,
+                        insert_call::<schema_dsl::Expr>(
+                            &ctx.ctx,
+                            "Single",
+                            &[new_term.to_value(&ctx.ctx).val],
+                        )
+                        .to_value(&ctx.ctx)
+                        .val,
+                    ],
+                );
+
+                let tnil = insert_call::<schema_dsl::TypeList>(&ctx.ctx, "TNil", &[]);
+                let appended_tail = insert_call::<schema_dsl::TypeList>(
+                    &ctx.ctx,
+                    "TCons",
+                    &[pat.ty.to_value(&ctx.ctx).val, tnil.0.val],
+                );
+                let new_tylist = insert_call::<schema_dsl::TypeList>(
+                    &ctx.ctx,
+                    "TLConcat",
+                    &[
+                        pat.tylist.to_value(&ctx.ctx).val,
+                        appended_tail.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_ins_ty =
+                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_tylist.0.val]);
+
+                let if_tr = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        true.to_value(&ctx.ctx).val,
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let if_fa = insert_call::<schema_dsl::Assumption>(
+                    &ctx.ctx,
+                    "InIf",
+                    &[
+                        false.to_value(&ctx.ctx).val,
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let arg_tr = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        new_ins_ty.to_value(&ctx.ctx).val,
+                        if_tr.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let arg_fa = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Arg",
+                    &[
+                        new_ins_ty.to_value(&ctx.ctx).val,
+                        if_fa.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let st_tr = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "SubTuple",
+                    &[arg_tr.to_value(&ctx.ctx).val, zero, orig_ins_len],
+                );
+                let st_fa = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "SubTuple",
+                    &[arg_fa.to_value(&ctx.ctx).val, zero, orig_ins_len],
+                );
+                let new_thn = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.thn.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let new_els = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.els.to_value(&ctx.ctx).val,
+                    ],
+                );
+
+                let pulled_in_true = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[arg_tr.to_value(&ctx.ctx).val, orig_ins_len],
+                );
+                let pulled_in_false = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Get",
+                    &[arg_fa.to_value(&ctx.ctx).val, orig_ins_len],
+                );
+                let subst_e1 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.e1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_e2 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.e2.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pulled_in_true, subst_e1);
+                ctx.union(pulled_in_false, subst_e2);
+
+                let subst_x1 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.x1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_y1 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_tr.to_value(&ctx.ctx).val,
+                        st_tr.to_value(&ctx.ctx).val,
+                        pat.y1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_x2 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.x2.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let subst_y2 = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Subst",
+                    &[
+                        if_fa.to_value(&ctx.ctx).val,
+                        st_fa.to_value(&ctx.ctx).val,
+                        pat.y2.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let _ = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Bop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x1.to_value(&ctx.ctx).val,
+                        subst_y1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                let _ = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "Bop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x2.to_value(&ctx.ctx).val,
+                        subst_y2.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.subsume(
+                    "Bop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x1.to_value(&ctx.ctx).val,
+                        subst_y1.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.subsume(
+                    "Bop",
+                    &[
+                        pat.op.to_value(&ctx.ctx).val,
+                        subst_x2.to_value(&ctx.ctx).val,
+                        subst_y2.to_value(&ctx.ctx).val,
+                    ],
+                );
+
+                let new_if = insert_call::<schema_dsl::Expr>(
+                    &ctx.ctx,
+                    "If",
+                    &[
+                        pat.pred.to_value(&ctx.ctx).val,
+                        new_ins.to_value(&ctx.ctx).val,
+                        new_thn.to_value(&ctx.ctx).val,
+                        new_els.to_value(&ctx.ctx).val,
+                    ],
+                );
+                ctx.union(pat.if_e, new_if);
+            },
+        );
+
+        ruleset
+    }
+}
+
+#[cfg(all(test, feature = "eggplant"))]
+mod native_tests {
+    use crate::ast::*;
+    use crate::eggplant_backend::test_lock;
+    use egglog::{ast::Expr as EgglogExpr, EGraph, TermDag};
+
+    fn candidate_expr() -> String {
+        tif(
+            getat(2),
+            parallel!(getat(0), getat(1), getat(3)),
+            less_than(getat(0), int(7)),
+            less_than(getat(1), int(7)),
+        )
+        .with_arg_types(tuplet!(intt(), intt(), boolt(), statet()), base(boolt()))
+        .to_string()
+    }
+
+    fn cicm_schedule() -> String {
+        let helpers = crate::schedule::helpers();
+        format!("(run-schedule {helpers})\n(run-schedule cicm)\n(run-schedule {helpers})\n")
+    }
+
+    fn eval_text(prologue: &str, expr: &str, schedule: &str) -> (String, Vec<String>) {
+        let program =
+            format!("{prologue}\n(let __rlcr_expr {expr})\n(ExprIsValid __rlcr_expr)\n{schedule}");
+        let mut egraph = EGraph::default();
+        egraph.parse_and_run_program(None, &program).unwrap();
+
+        let (serialized, _) = crate::greedy_dag_extractor::serialized_egraph(egraph.clone());
+        let mut if_nodes = serialized
+            .nodes
+            .values()
+            .filter(|node| node.op == "If")
+            .map(|node| format!("{node:?}"))
+            .collect::<Vec<_>>();
+        if_nodes.sort();
+
+        let mut termdag = TermDag::default();
+        let (sort, value) = egraph
+            .eval_expr(&EgglogExpr::Var(
+                egglog::ast::Span::Panic,
+                "__rlcr_expr".into(),
+            ))
+            .unwrap();
+        let (_, extracted) = egraph.extract(value, &mut termdag, &sort).unwrap();
+        (termdag.to_string(&extracted), if_nodes)
+    }
+
+    fn eval_native(
+        prologue: &str,
+        expr: &str,
+        schedule: &str,
+        ablate: Option<&str>,
+    ) -> (String, Vec<String>) {
+        let initialization = format!("(let __rlcr_expr {expr})\n(ExprIsValid __rlcr_expr)");
+        use eggplant::egglog::ast::Expr as NativeEgglogExpr;
+
+        crate::with_native_rules_egraph(prologue, &initialization, schedule, ablate, |egraph| {
+            let (serialized, _) = crate::greedy_dag_extractor::serialized_egraph_native(egraph)
+                .map_err(|err| {
+                    eggplant::egglog::Error::ParseError(eggplant::egglog::ast::ParseError(
+                        eggplant::egglog::ast::Span::Panic,
+                        err,
+                    ))
+                })?;
+            let mut if_nodes = serialized
+                .nodes
+                .values()
+                .filter(|node| node.op == "If")
+                .map(|node| format!("{node:?}"))
+                .collect::<Vec<_>>();
+            if_nodes.sort();
+
+            let (sort, value) = egraph.eval_expr(&NativeEgglogExpr::Var(
+                eggplant::egglog::ast::Span::Panic,
+                "__rlcr_expr".into(),
+            ))?;
+            let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
+            Ok((termdag.to_string(extracted), if_nodes))
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn native_feature_path_matches_text_backend_for_cicm_case() {
+        let _guard = test_lock::lock();
+        let expr = candidate_expr();
+        let schedule = cicm_schedule();
+
+        let (text_extracted, text_if_nodes) =
+            eval_text(&crate::prologue_egglog_text(), &expr, &schedule);
+        let (native_extracted, native_if_nodes) = eval_native(
+            &crate::feature_execution_prologue(true, None),
+            &expr,
+            &schedule,
+            None,
+        );
+
+        assert_eq!(native_extracted, text_extracted);
+        assert_eq!(native_if_nodes.len(), text_if_nodes.len());
+        assert!(
+            native_if_nodes.iter().any(|node| node.contains("SubTuple")),
+            "native cicm feature path should preserve the normalized If input shape"
+        );
+        assert!(
+            text_if_nodes.iter().any(|node| node.contains("SubTuple")),
+            "text cicm backend should preserve the normalized If input shape"
+        );
+    }
+}

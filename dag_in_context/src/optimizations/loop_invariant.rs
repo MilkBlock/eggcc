@@ -4,7 +4,7 @@ use strum::IntoEnumIterator;
 #[cfg(test)]
 use crate::{egglog_test, interpreter::Value};
 
-fn is_inv_base_case_for_ctor(ctor: Constructor) -> Option<String> {
+pub(crate) fn generated_base_case_rule_for_ctor(ctor: Constructor) -> Option<String> {
     let ruleset = " :ruleset always-run";
 
     match ctor {
@@ -30,7 +30,7 @@ fn is_inv_base_case_for_ctor(ctor: Constructor) -> Option<String> {
     }
 }
 
-fn is_invariant_rule_for_ctor(ctor: Constructor) -> Option<String> {
+pub(crate) fn generated_invariant_rule_for_ctor(ctor: Constructor) -> Option<String> {
     let ruleset = " :ruleset always-run";
     let ctor_pattern = ctor.construct(|field| field.var());
 
@@ -82,10 +82,23 @@ fn is_invariant_rule_for_ctor(ctor: Constructor) -> Option<String> {
 
 const LOOP_INVARIANT: &str = include_str!("loop_invariant.egg");
 
+pub(crate) fn generated_rules_for_ctor(ctor: Constructor) -> Vec<String> {
+    generated_base_case_rule_for_ctor(ctor.clone())
+        .into_iter()
+        .chain(generated_invariant_rule_for_ctor(ctor))
+        .collect()
+}
+
 pub(crate) fn generated_rules() -> Vec<String> {
     Constructor::iter()
-        .filter_map(is_inv_base_case_for_ctor)
-        .chain(Constructor::iter().filter_map(is_invariant_rule_for_ctor))
+        .flat_map(generated_rules_for_ctor)
+        .collect::<Vec<_>>()
+}
+
+pub(crate) fn generated_rules_excluding(excluded: &[Constructor]) -> Vec<String> {
+    Constructor::iter()
+        .filter(|ctor| !excluded.contains(ctor))
+        .flat_map(generated_rules_for_ctor)
         .collect::<Vec<_>>()
 }
 

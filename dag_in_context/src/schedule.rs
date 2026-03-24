@@ -91,6 +91,14 @@ pub(crate) fn helpers() -> String {
     ;; finally, subsume now that helpers are done
     subsume-after-helpers
 
+    ;; native loop_invariant generated support rules run here in feature mode.
+    ;; Interleave them with always-run once so list helpers can consume
+    ;; generated branch/leaf invariants before a final generated pass lifts
+    ;; mixed dependents like Call and Switch.
+    (saturate loop-invariant-generated)
+    (saturate always-run)
+    (saturate loop-invariant-generated)
+
     ;; do a boundary analysis for loop invariant code motion
     boundary-analysis-prep
     ;; set which expression to hoist (see evil hack in loop_invariant.egg)

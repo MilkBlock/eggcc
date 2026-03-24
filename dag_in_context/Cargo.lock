@@ -511,9 +511,7 @@ dependencies = [
 
 [[package]]
 name = "egglog"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5db59f6e51690dfcd2869f177de10f6da2dc136e9b445aa96c89e9eae1f3d3d"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "clap",
@@ -524,6 +522,7 @@ dependencies = [
  "egglog-bridge",
  "egglog-core-relations",
  "egglog-numeric-id",
+ "egglog-reports",
  "egraph-serialize 0.3.0",
  "env_logger 0.11.9",
  "hashbrown 0.16.1",
@@ -535,15 +534,14 @@ dependencies = [
  "ordered-float 5.1.0",
  "rayon",
  "rustc-hash 2.1.1",
+ "serde_json",
  "thiserror 2.0.18",
  "web-time",
 ]
 
 [[package]]
 name = "egglog-add-primitive"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b068812fdaf5b6c0daee9c4718981bb8c38075eb13717b2c8d84c0b00036b71"
+version = "2.0.0"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -551,23 +549,20 @@ dependencies = [
 
 [[package]]
 name = "egglog-ast"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d128c74523e470c28d4442ea389872cbce21cc7a67579d3b8a985863a63de8f8"
+version = "2.0.0"
 dependencies = [
  "ordered-float 5.1.0",
 ]
 
 [[package]]
 name = "egglog-bridge"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbe731d8a2006e3bdc1b831e9db4899aaa095f0470e9d64b9c15fbe9419f42a4"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "dyn-clone",
  "egglog-core-relations",
  "egglog-numeric-id",
+ "egglog-reports",
  "egglog-union-find",
  "hashbrown 0.16.1",
  "indexmap",
@@ -584,27 +579,27 @@ dependencies = [
 
 [[package]]
 name = "egglog-concurrency"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d7462d094fd0d9da45a7bd2c4b09ab530b8935ba060cd15c181d94e480f9add"
+version = "2.0.0"
 dependencies = [
  "arc-swap",
+ "egglog-numeric-id",
  "rayon",
+ "smallvec",
 ]
 
 [[package]]
 name = "egglog-core-relations"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65216043dda610b3f6e791184c329910e1c6c94dde873150e9ca41bc507599b2"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "bumpalo",
+ "crossbeam",
  "crossbeam-queue",
  "dashmap",
  "dyn-clone",
  "egglog-concurrency",
  "egglog-numeric-id",
+ "egglog-reports",
  "egglog-union-find",
  "fixedbitset 0.5.7",
  "hashbrown 0.16.1",
@@ -623,18 +618,27 @@ dependencies = [
 
 [[package]]
 name = "egglog-numeric-id"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f81100cddb02741105fe8c445f0f2dc66919dbf65aab380ff903ff54e458805"
+version = "2.0.0"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
+name = "egglog-reports"
+version = "2.0.0"
+dependencies = [
+ "clap",
+ "hashbrown 0.16.1",
+ "indexmap",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "web-time",
+]
+
+[[package]]
 name = "egglog-union-find"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c4e41ab6ea1bec16de378bd2acaf374997a02ce7f88ef084f7b00f7d2be9e7b"
+version = "2.0.0"
 dependencies = [
  "crossbeam",
  "egglog-concurrency",
@@ -644,20 +648,23 @@ dependencies = [
 [[package]]
 name = "eggplant"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e170edd9c3bfbc45c8ce73c91eedbd1112f68dbfde592dab2cf0abd38c3f0ebe"
 dependencies = [
+ "crossbeam",
  "dashmap",
  "derive_more",
- "egglog 1.0.0",
+ "egglog 2.0.0",
+ "egglog-reports",
  "eggplant-macros",
  "env_logger 0.11.9",
  "graphviz-rust 0.9.7",
+ "indexmap",
  "inventory",
+ "itertools",
  "log",
  "petgraph 0.6.5",
  "serde",
  "serde_json",
+ "sha2",
  "smallvec",
  "strum",
  "strum_macros",
@@ -682,8 +689,6 @@ dependencies = [
 [[package]]
 name = "eggplant-transpiler"
 version = "0.2.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "443c1ffe4e64b320186becc093b60e61b5119230815e57cd54c41a453af482df"
 dependencies = [
  "clap",
  "env_logger 0.11.9",
@@ -944,6 +949,8 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -1079,6 +1086,15 @@ name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
+
+[[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
 
 [[package]]
 name = "itoa"

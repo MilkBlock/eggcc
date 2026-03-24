@@ -35,3 +35,196 @@ const SWAP_IF: &str = r#"(ruleset swap-if)
           (Concat (Single (Get else 1)) (Single (Get else 0)))))
   )
   :ruleset swap-if)"#;
+
+#[cfg(feature = "eggplant")]
+pub(crate) mod native {
+    use super::super::native_rule_helpers::insert_call;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+
+    #[eggplant::pat_vars]
+    struct SwapIfPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        then_: schema_dsl::Expr,
+        else_: schema_dsl::Expr,
+        if_expr: schema_dsl::If,
+    }
+
+    fn swap_if_pat<PR: PatRecSgl>() -> SwapIfPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+
+        SwapIfPat::new(pred, inputs, then_, else_, if_expr)
+    }
+
+    #[eggplant::pat_vars]
+    struct SwapIfTuplePat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        then0: schema_dsl::Get,
+        then1: schema_dsl::Get,
+        else0: schema_dsl::Get,
+        else1: schema_dsl::Get,
+        lhs0: schema_dsl::Get,
+        lhs1: schema_dsl::Get,
+        if_expr: schema_dsl::If,
+    }
+
+    fn swap_if_tuple_pat<PR: PatRecSgl>() -> SwapIfTuplePat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let then_ = schema_dsl::Expr::query_leaf();
+        let else_ = schema_dsl::Expr::query_leaf();
+        let if_expr = schema_dsl::If::query(&pred, &inputs, &then_, &else_);
+
+        let lhs0 = schema_dsl::Get::query(&if_expr);
+        let lhs1 = schema_dsl::Get::query(&if_expr);
+        let then0 = schema_dsl::Get::query(&then_);
+        let then1 = schema_dsl::Get::query(&then_);
+        let else0 = schema_dsl::Get::query(&else_);
+        let else1 = schema_dsl::Get::query(&else_);
+
+        let lhs_canonical = schema_dsl::Concat::query(
+            &schema_dsl::Single::query(&lhs0),
+            &schema_dsl::Single::query(&lhs1),
+        );
+        let then_canonical = schema_dsl::Concat::query(
+            &schema_dsl::Single::query(&then0),
+            &schema_dsl::Single::query(&then1),
+        );
+        let else_canonical = schema_dsl::Concat::query(
+            &schema_dsl::Single::query(&else0),
+            &schema_dsl::Single::query(&else1),
+        );
+
+        let lhs0_is_first = lhs0.handle_index().eq(&(&0_i64).as_handle());
+        let lhs1_is_second = lhs1.handle_index().eq(&(&1_i64).as_handle());
+        let then0_is_first = then0.handle_index().eq(&(&0_i64).as_handle());
+        let then1_is_second = then1.handle_index().eq(&(&1_i64).as_handle());
+        let else0_is_first = else0.handle_index().eq(&(&0_i64).as_handle());
+        let else1_is_second = else1.handle_index().eq(&(&1_i64).as_handle());
+        let lhs_is_two_tuple = if_expr.handle().eq(&lhs_canonical.handle());
+        let then_is_two_tuple = then_.handle().eq(&then_canonical.handle());
+        let else_is_two_tuple = else_.handle().eq(&else_canonical.handle());
+
+        SwapIfTuplePat::new(
+            pred, inputs, then0, then1, else0, else1, lhs0, lhs1, if_expr,
+        )
+        .assert(lhs0_is_first)
+        .assert(lhs1_is_second)
+        .assert(then0_is_first)
+        .assert(then1_is_second)
+        .assert(else0_is_first)
+        .assert(else1_is_second)
+        .assert(lhs_is_two_tuple)
+        .assert(then_is_two_tuple)
+        .assert(else_is_two_tuple)
+    }
+
+    pub(crate) fn register_native_rules() -> RuleSetId {
+        let ruleset = PeepholeTx::new_ruleset("swap-if");
+
+        PeepholeTx::add_rule("swap_if_not", ruleset, swap_if_pat, |ctx, pat| {
+            let not_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Not", &[]);
+            let inverted_pred = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Uop",
+                &[not_op.0.val, pat.pred.to_value(&ctx.ctx).val],
+            );
+            let swapped_if = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "If",
+                &[
+                    inverted_pred.to_value(&ctx.ctx).val,
+                    pat.inputs.to_value(&ctx.ctx).val,
+                    pat.else_.to_value(&ctx.ctx).val,
+                    pat.then_.to_value(&ctx.ctx).val,
+                ],
+            );
+
+            ctx.union(pat.if_expr, swapped_if);
+        });
+
+        PeepholeTx::add_rule("swap_if_tuple", ruleset, swap_if_tuple_pat, |ctx, pat| {
+            let swapped_then = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Concat",
+                &[
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.then1.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.then0.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                ],
+            );
+            let swapped_else = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Concat",
+                &[
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.else1.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.else0.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                ],
+            );
+            let swapped_if = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "If",
+                &[
+                    pat.pred.to_value(&ctx.ctx).val,
+                    pat.inputs.to_value(&ctx.ctx).val,
+                    swapped_then.to_value(&ctx.ctx).val,
+                    swapped_else.to_value(&ctx.ctx).val,
+                ],
+            );
+            let swapped_outputs = insert_call::<schema_dsl::Expr>(
+                &ctx.ctx,
+                "Concat",
+                &[
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.lhs1.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                    insert_call::<schema_dsl::Expr>(
+                        &ctx.ctx,
+                        "Single",
+                        &[pat.lhs0.to_value(&ctx.ctx).val],
+                    )
+                    .to_value(&ctx.ctx)
+                    .val,
+                ],
+            );
+
+            ctx.union(swapped_outputs, swapped_if);
+        });
+
+        ruleset
+    }
+}

@@ -127,8 +127,16 @@ fn main() {
 
     let start_time = std::time::Instant::now();
 
+    let file = match args.file.extension().and_then(OsStr::to_str) {
+        Some("rs") => TestProgram::RustFile(args.file.clone()),
+        Some("bril") => TestProgram::BrilFile(args.file.clone()),
+        Some("cu") | Some("cuh") => TestProgram::CudaFile(args.file.clone()),
+        Some(x) => panic!("unexpected file extension {x}"),
+        None => panic!("could not parse file extension"),
+    };
+
     if let Some(debug_dir) = args.debug_dir {
-        if let Result::Err(error) = visualize(TestProgram::BrilFile(args.file.clone()), debug_dir) {
+        if let Result::Err(error) = visualize(file.clone(), debug_dir) {
             eprintln!("{}", error);
             return;
         }
@@ -141,13 +149,6 @@ fn main() {
         );
         return;
     }
-
-    let file = match args.file.extension().and_then(OsStr::to_str) {
-        Some("rs") => TestProgram::RustFile(args.file.clone()),
-        Some("bril") => TestProgram::BrilFile(args.file.clone()),
-        Some(x) => panic!("unexpected file extension {x}"),
-        None => panic!("could not parse file extension"),
-    };
 
     let run = Run {
         prog_with_args: file.read_program(),

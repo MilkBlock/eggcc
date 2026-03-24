@@ -131,6 +131,22 @@ fn feature_execution_prologue(use_context: bool, ablate: Option<&str>) -> String
         | Some("switch_rewrite")
         | Some("always-switch-rewrite")
         | Some("select_opt")
+        | Some("canon")
+        | Some("drop-at")
+        | Some("cicm")
+        | Some("term-subst")
+        | Some("subst")
+        | Some("swap-if")
+        | Some("push-in")
+        | Some("rec-to-loop")
+        | Some("loop-unroll")
+        | Some("loop-strength-reduction")
+        | Some("loop-inv-motion")
+        | Some("hacker")
+        | Some("interval-analysis")
+        | Some("expr-size")
+        | Some("mem-simple")
+        | Some("non-weakly-linear")
         | None => native_execution_prologue(),
         Some(ablate) => ablate_prologue(&native_execution_prologue(), ablate),
     };
@@ -1096,7 +1112,8 @@ pub(crate) fn with_native_rules_egraph<T, F>(
 where
     F: FnOnce(&mut eggplant::egglog::EGraph) -> std::result::Result<T, eggplant::egglog::Error>,
 {
-    use eggplant::prelude::RxSgl;
+    use eggplant::prelude::SingletonGetter;
+    use eggplant::wrap::NonPatRecSgl;
 
     static NATIVE_RUN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let _run_guard = NATIVE_RUN_LOCK
@@ -1104,15 +1121,20 @@ where
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
+    eggplant_backend::peepholes::native::PeepholeTx::sgl().reset_for_bench();
     let egraph = eggplant_backend::peepholes::native::PeepholeTx::egraph();
     {
-        let mut guard = egraph.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut guard = egraph
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *guard = eggplant::egglog::EGraph::default();
         guard.parse_and_run_program(None, prologue)?;
         guard.parse_and_run_program(None, initialization)?;
     }
     eggplant_backend::register_native_rules(ablate);
-    let mut guard = egraph.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = egraph
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard.parse_and_run_program(None, schedule)?;
     run(&mut guard)
 }

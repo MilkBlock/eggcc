@@ -43,4 +43,5 @@ dag_in_context/src/tiger/main
 
 # Local development files
 .cargo/
+.artifacts/
 PLAN2_DRAFT.md

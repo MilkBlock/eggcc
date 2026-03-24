@@ -42,7 +42,7 @@ mod native_tests {
                 binding.into(),
             ))?;
             let (termdag, extracted, _) = egraph.extract_value(&sort, value)?;
-            Ok(termdag.to_string(&extracted))
+            Ok(termdag.to_string(extracted))
         })
         .unwrap()
     }
@@ -65,9 +65,7 @@ mod native_tests {
 
     fn select_schedule() -> String {
         let helpers = crate::schedule::helpers();
-        format!(
-            "(run-schedule {helpers})\n(run-schedule select_opt)\n(run-schedule {helpers})"
-        )
+        format!("(run-schedule {helpers})\n(run-schedule select_opt)\n(run-schedule {helpers})")
     }
 
     #[test]
@@ -139,12 +137,110 @@ const SELECT: &str = r#"(ruleset select_opt)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::{
-        call_expr, i64_expr, insert_call, node_expr, var_expr, EqCallConstraint, FactConstraint,
-    };
+    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
-    use crate::eggplant_backend::peepholes::native::{PeepholePatRec, PeepholeTx};
-    use eggplant::prelude::{Insertable, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use eggplant::prelude::{
+        prim_call, prim_fact, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl,
+        RuleRunnerSgl, RuleSetId,
+    };
+    use eggplant::wrap::EgglogTy;
+
+    #[derive(Clone, Copy, Debug)]
+    struct TermAndCostTy;
+
+    impl EgglogTy for TermAndCostTy {
+        const TY_NAME: &'static str = "TermAndCost";
+        const TY_NAME_LOWER: &'static str = "term_and_cost";
+        type Valued = eggplant::wrap::Value<Self>;
+        type EnumVariantMarker = ();
+    }
+
+    #[eggplant::pat_vars]
+    struct SelectOptPat<PR: PatRecSgl> {
+        pred: schema_dsl::Expr,
+        inputs: schema_dsl::Expr,
+        ctx: schema_dsl::Assumption,
+        t1: schema_dsl::Term,
+        t2: schema_dsl::Term,
+        if_out: schema_dsl::Get,
+    }
+
+    fn select_opt_pat<PR: PatRecSgl>() -> SelectOptPat<PR> {
+        let pred = schema_dsl::Expr::query_leaf();
+        let inputs = schema_dsl::Expr::query_leaf();
+        let thn = schema_dsl::Expr::query_leaf();
+        let els = schema_dsl::Expr::query_leaf();
+        let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
+        let if_out = schema_dsl::Get::query(&if_e);
+        let thn_out = schema_dsl::Get::query(&thn);
+        let els_out = schema_dsl::Get::query(&els);
+        let ctx = schema_dsl::Assumption::query_leaf();
+        let t1 = schema_dsl::Term::query_leaf();
+        let t2 = schema_dsl::Term::query_leaf();
+        let size1 = BaseVar::<i64, PR>::query_named("size1");
+        let size2 = BaseVar::<i64, PR>::query_named("size2");
+        let c1 = BaseVar::<i64, PR>::query_named("c1");
+        let c2 = BaseVar::<i64, PR>::query_named("c2");
+
+        let same_then_index = if_out.handle_index().eq(&thn_out.handle_index());
+        let same_else_index = if_out.handle_index().eq(&els_out.handle_index());
+        let thn_pure = prim_fact("ExprIsPure", vec![thn_out.handle().into_handle_ty()]);
+        let els_pure = prim_fact("ExprIsPure", vec![els_out.handle().into_handle_ty()]);
+        let if_context = prim_fact(
+            "ContextOf",
+            vec![if_e.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
+        );
+        let thn_size = size1
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![thn_out.handle().into_handle_ty()]));
+        let els_size = size2
+            .handle()
+            .eq(&prim_call::<i64>("Expr-size", vec![els_out.handle().into_handle_ty()]));
+        let thn_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size1.handle().into_handle_ty(),
+            ],
+        );
+        let els_small = prim_fact(
+            ">",
+            vec![
+                (&10_i64).as_handle().into_handle_ty(),
+                size2.handle().into_handle_ty(),
+            ],
+        );
+        let thn_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t1.handle().into_handle_ty(), c1.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![thn_out.handle().into_handle_ty()],
+        ));
+        let els_extracted = prim_call::<TermAndCostTy>(
+            "TCPair",
+            vec![t2.handle().into_handle_ty(), c2.handle().into_handle_ty()],
+        )
+        .eq(&prim_call::<TermAndCostTy>(
+            "ExtractedExpr",
+            vec![els_out.handle().into_handle_ty()],
+        ));
+
+        SelectOptPat::new(pred, inputs, ctx, t1, t2, if_out)
+            .assert(same_then_index)
+            .assert(same_else_index)
+            .assert(thn_pure)
+            .assert(els_pure)
+            .assert(if_context)
+            .assert(thn_size)
+            .assert(els_size)
+            .assert(thn_small)
+            .assert(els_small)
+            .assert(thn_extracted)
+            .assert(els_extracted)
+    }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
         let ruleset = PeepholeTx::new_ruleset("select_opt");
@@ -152,114 +248,35 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "select_opt_inline_if_output",
             ruleset,
-            || {
-                let pred = schema_dsl::Expr::query_leaf();
-                let inputs = schema_dsl::Expr::query_leaf();
-                let thn = schema_dsl::Expr::query_leaf();
-                let els = schema_dsl::Expr::query_leaf();
-                let if_e = schema_dsl::If::query(&pred, &inputs, &thn, &els);
-                let if_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let thn_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let els_out: schema_dsl::Expr<PeepholePatRec, _> = schema_dsl::Expr::query_leaf();
-                let ctx: schema_dsl::Assumption<PeepholePatRec, _> =
-                    schema_dsl::Assumption::query_leaf();
-                let t1: schema_dsl::Term<PeepholePatRec, _> = schema_dsl::Term::query_leaf();
-                let t2: schema_dsl::Term<PeepholePatRec, _> = schema_dsl::Term::query_leaf();
-
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&if_out),
-                    "Get",
-                    vec![node_expr(&if_e), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&thn_out),
-                    "Get",
-                    vec![node_expr(&thn), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    node_expr(&els_out),
-                    "Get",
-                    vec![node_expr(&els), var_expr("i")],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ExprIsPure",
-                    vec![node_expr(&thn_out)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ExprIsPure",
-                    vec![node_expr(&els_out)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    "ContextOf",
-                    vec![node_expr(&if_e), node_expr(&ctx)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    var_expr("size1"),
-                    "Expr-size",
-                    vec![node_expr(&thn_out)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    var_expr("size2"),
-                    "Expr-size",
-                    vec![node_expr(&els_out)],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    ">",
-                    vec![i64_expr(10), var_expr("size1")],
-                ));
-                PeepholePatRec::on_new_constraint(FactConstraint::new(
-                    ">",
-                    vec![i64_expr(10), var_expr("size2")],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    call_expr("TCPair", vec![node_expr(&t1), var_expr("c1")]),
-                    "ExtractedExpr",
-                    vec![node_expr(&thn_out)],
-                ));
-                PeepholePatRec::on_new_constraint(EqCallConstraint::new(
-                    call_expr("TCPair", vec![node_expr(&t2), var_expr("c2")]),
-                    "ExtractedExpr",
-                    vec![node_expr(&els_out)],
-                ));
-
-                #[eggplant::pat_vars_catch]
-                struct SelectOptPat {
-                    pred: schema_dsl::Expr,
-                    inputs: schema_dsl::Expr,
-                    ctx: schema_dsl::Assumption,
-                    t1: schema_dsl::Term,
-                    t2: schema_dsl::Term,
-                    if_out: schema_dsl::Expr,
-                }
-            },
+            select_opt_pat,
             |ctx, pat| {
                 let then_subst = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "TermSubst",
                     &[
-                        pat.ctx.to_value(ctx).val,
-                        pat.inputs.to_value(ctx).val,
-                        pat.t1.to_value(ctx).val,
+                        pat.ctx.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.t1.to_value(&ctx.ctx).val,
                     ],
                 );
                 let else_subst = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "TermSubst",
                     &[
-                        pat.ctx.to_value(ctx).val,
-                        pat.inputs.to_value(ctx).val,
-                        pat.t2.to_value(ctx).val,
+                        pat.ctx.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx.ctx).val,
+                        pat.t2.to_value(&ctx.ctx).val,
                     ],
                 );
-                let op = insert_call::<schema_dsl::TernaryOp>(ctx, "Select", &[]);
+                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
                 let select = insert_call::<schema_dsl::Expr>(
-                    ctx,
+                    &ctx.ctx,
                     "Top",
                     &[
                         op.0.val,
-                        pat.pred.to_value(ctx).val,
-                        then_subst.to_value(ctx).val,
-                        else_subst.to_value(ctx).val,
+                        pat.pred.to_value(&ctx.ctx).val,
+                        then_subst.to_value(&ctx.ctx).val,
+                        else_subst.to_value(&ctx.ctx).val,
                     ],
                 );
                 ctx.union(pat.if_out, select);
