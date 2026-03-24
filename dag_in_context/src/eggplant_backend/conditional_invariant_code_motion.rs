@@ -193,8 +193,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
-        RuleSetId,
+        prim_call, AsHandle, BaseVar, Compare, Insertable, IntoHandleTy, PEq, PatRecSgl,
+        RuleRunnerSgl, RuleSetId,
     };
     use eggplant::wrap::EgglogTy;
 
@@ -391,13 +391,7 @@ pub(crate) mod native {
             "Expr-size",
             vec![e1.handle().into_handle_ty()],
         ));
-        let e1_small = eggplant::wrap::FactCallConstraint {
-            op: ">",
-            operands: vec![
-                (&10_i64).as_handle().into_handle_ty(),
-                size1.handle().into_handle_ty(),
-            ],
-        };
+        let e1_small = size1.handle().lt(&10_i64);
         let e1_pure = eggplant::wrap::FactCallConstraint {
             op: "ExprIsPure",
             operands: vec![e1.handle().into_handle_ty()],
@@ -426,13 +420,7 @@ pub(crate) mod native {
             "Expr-size",
             vec![e2.handle().into_handle_ty()],
         ));
-        let e2_small = eggplant::wrap::FactCallConstraint {
-            op: ">",
-            operands: vec![
-                (&10_i64).as_handle().into_handle_ty(),
-                size2.handle().into_handle_ty(),
-            ],
-        };
+        let e2_small = size2.handle().lt(&10_i64);
         let e2_pure = eggplant::wrap::FactCallConstraint {
             op: "ExprIsPure",
             operands: vec![e2.handle().into_handle_ty()],
@@ -614,20 +602,8 @@ pub(crate) mod native {
             "Expr-size",
             vec![e2.handle().into_handle_ty()],
         ));
-        let e1_small = eggplant::wrap::FactCallConstraint {
-            op: ">",
-            operands: vec![
-                (&10_i64).as_handle().into_handle_ty(),
-                size1.handle().into_handle_ty(),
-            ],
-        };
-        let e2_small = eggplant::wrap::FactCallConstraint {
-            op: ">",
-            operands: vec![
-                (&10_i64).as_handle().into_handle_ty(),
-                size2.handle().into_handle_ty(),
-            ],
-        };
+        let e1_small = size1.handle().lt(&10_i64);
+        let e2_small = size2.handle().lt(&10_i64);
         let e1_pure = eggplant::wrap::FactCallConstraint {
             op: "ExprIsPure",
             operands: vec![e1.handle().into_handle_ty()],

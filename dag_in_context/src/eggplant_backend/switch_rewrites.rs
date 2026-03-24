@@ -171,7 +171,8 @@ pub(crate) mod native {
     use crate::eggplant_backend::interval_bounds::{hi_bound, lo_bound, IntB};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        prim_call, BaseVar, Compare, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
+        RuleSetId,
     };
 
     pub(crate) fn ensure_always_native_ruleset() -> RuleSetId {
@@ -619,13 +620,8 @@ pub(crate) mod native {
             "tuple-length",
             vec![ins.handle().into_handle_ty()],
         ));
-        let rhs_small = eggplant::wrap::FactCallConstraint {
-            op: "<",
-            operands: vec![
-                prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
-                (&100_i64).into_handle_ty(),
-            ],
-        };
+        let rhs_small =
+            prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).lt(&100_i64);
 
         SwitchAndPat::new(lhs, a, b, ins, x, y, ins_ty)
             .assert(ins_has_type)
@@ -670,20 +666,10 @@ pub(crate) mod native {
             "tuple-length",
             vec![ins.handle().into_handle_ty()],
         ));
-        let lhs_small = eggplant::wrap::FactCallConstraint {
-            op: "<",
-            operands: vec![
-                prim_call::<i64>("Expr-size", vec![x.handle().into_handle_ty()]).into_handle_ty(),
-                (&100_i64).into_handle_ty(),
-            ],
-        };
-        let rhs_small = eggplant::wrap::FactCallConstraint {
-            op: "<",
-            operands: vec![
-                prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).into_handle_ty(),
-                (&100_i64).into_handle_ty(),
-            ],
-        };
+        let lhs_small =
+            prim_call::<i64>("Expr-size", vec![x.handle().into_handle_ty()]).lt(&100_i64);
+        let rhs_small =
+            prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).lt(&100_i64);
 
         SwitchOrPat::new(lhs, a, b, ins, x, y, ins_ty)
             .assert(ins_has_type)

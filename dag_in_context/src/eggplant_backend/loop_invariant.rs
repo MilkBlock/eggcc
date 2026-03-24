@@ -156,8 +156,8 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
-        RuleSetId,
+        prim_call, AsHandle, BaseVar, Compare, Insertable, IntoHandleTy, PEq, PatRecSgl,
+        RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -836,13 +836,7 @@ pub(crate) mod native {
             ],
         ));
         let inv_size_fact = expr_size_query(&inv, &inv_size);
-        let inv_is_large_enough = eggplant::wrap::FactCallConstraint {
-            op: ">",
-            operands: vec![
-                inv_size.handle().into_handle_ty(),
-                (&1_i64).as_handle().into_handle_ty(),
-            ],
-        };
+        let inv_is_large_enough = inv_size.handle().gt(&1_i64);
         let loop_has_context = eggplant::wrap::FactCallConstraint {
             op: "ContextOf",
             operands: vec![
