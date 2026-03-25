@@ -29,8 +29,8 @@ const DEBUG_HELPER: &str = r#";; use these rules to clean up the database, remov
       ((delete (HasArgType e ty)))
       :ruleset debug-deletes)
 
-(rule ((is-inv-Expr e ty))
-      ((delete (is-inv-Expr e ty)))
+(rule ((IsInvExpr e ty))
+      ((delete (IsInvExpr e ty)))
       :ruleset debug-deletes)
 
 (rule ((tuple-length e))

@@ -126,12 +126,12 @@ const PASSTHROUGH_RULES: &str = r#"(ruleset passthrough)
       :ruleset passthrough)"#;
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{
-        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+    use crate::eggplant_backend::schema_dsl::{
+        AssumptionPRRuleCtx, ExprPRRuleCtx, ToSubsumeIfPRRuleCtx, UnaryOpPRRuleCtx,
     };
+    use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     fn type_leaf<PR: PatRecSgl>() -> schema_dsl::Type<PR> {
         schema_dsl::Type::query_leaf()
@@ -165,6 +165,8 @@ pub(crate) mod native {
     struct LoopThetaPat<PR: PatRecSgl> {
         inputs: schema_dsl::Expr,
         lhs: schema_dsl::Get,
+        has_type: schema_dsl::HasType,
+        pure_type: schema_dsl::PureType,
     }
 
     fn loop_theta_pat<PR: PatRecSgl>() -> LoopThetaPat<PR> {
@@ -180,24 +182,13 @@ pub(crate) mod native {
             .eq(&(lhs.handle_index() + (&1_i64).as_handle()));
         let arg_index_matches = arg_out.handle_index().eq(&lhs.handle_index());
         let same_body_value = body_out.handle().eq(&arg_out.handle());
-        let has_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                lhs.handle().into_handle_ty(),
-                lhs_ty.handle().into_handle_ty(),
-            ],
-        };
-        let pure_type = eggplant::wrap::FactCallConstraint {
-            op: "PureType",
-            operands: vec![lhs_ty.handle().into_handle_ty()],
-        };
+        let has_type = schema_dsl::HasType::query_fields(&lhs, &lhs_ty);
+        let pure_type = schema_dsl::PureType::query_fields(&lhs_ty);
 
-        LoopThetaPat::new(inputs, lhs)
+        LoopThetaPat::new(inputs, lhs, has_type, pure_type)
             .assert(body_index_matches)
             .assert(arg_index_matches)
             .assert(same_body_value)
-            .assert(has_type)
-            .assert(pure_type)
     }
 
     #[eggplant::pat_vars]
@@ -205,6 +196,7 @@ pub(crate) mod native {
         inputs: schema_dsl::Expr,
         arg0_out: schema_dsl::Get,
         lhs: schema_dsl::Get,
+        has_type: schema_dsl::HasType,
     }
 
     fn switch_arg_pat<PR: PatRecSgl>() -> SwitchArgPat<PR> {
@@ -232,22 +224,15 @@ pub(crate) mod native {
         let same_arg_index = arg0_out.handle_index().eq(&arg1_out.handle_index());
         let same_branch0_value = branch0_out.handle().eq(&arg0_out.handle());
         let same_branch1_value = branch1_out.handle().eq(&arg1_out.handle());
-        let has_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                lhs.handle().into_handle_ty(),
-                lhs_ty.handle().into_handle_ty(),
-            ],
-        };
+        let has_type = schema_dsl::HasType::query_fields(&lhs, &lhs_ty);
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
-        SwitchArgPat::new(inputs, arg0_out, lhs)
+        SwitchArgPat::new(inputs, arg0_out, lhs, has_type)
             .assert(same_branch0_index)
             .assert(same_branch1_index)
             .assert(same_arg_index)
             .assert(same_branch0_value)
             .assert(same_branch1_value)
-            .assert(has_type)
             .assert(is_not_state)
     }
 
@@ -290,6 +275,7 @@ pub(crate) mod native {
         inputs: schema_dsl::Expr,
         then_arg_out: schema_dsl::Get,
         lhs: schema_dsl::Get,
+        has_type: schema_dsl::HasType,
     }
 
     fn if_arg_pat<PR: PatRecSgl>() -> IfArgPat<PR> {
@@ -314,22 +300,15 @@ pub(crate) mod native {
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                then_branch.handle().into_handle_ty(),
-                lhs_ty.handle().into_handle_ty(),
-            ],
-        };
+        let has_type = schema_dsl::HasType::query_fields(&then_branch, &lhs_ty);
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
-        IfArgPat::new(inputs, then_arg_out, lhs)
+        IfArgPat::new(inputs, then_arg_out, lhs, has_type)
             .assert(same_then_index)
             .assert(same_else_index)
             .assert(same_arg_index)
             .assert(same_then_value)
             .assert(same_else_value)
-            .assert(has_type)
             .assert(is_not_state)
     }
 
@@ -342,6 +321,7 @@ pub(crate) mod native {
         outputs: schema_dsl::If,
         then_arg_out: schema_dsl::Get,
         lhs: schema_dsl::Get,
+        has_state_type: schema_dsl::HasType,
     }
 
     fn if_state_edge_pat<PR: PatRecSgl>() -> IfStateEdgePat<PR> {
@@ -365,21 +345,23 @@ pub(crate) mod native {
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_state_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                then_branch.handle().into_handle_ty(),
-                state_type::<PR>().handle().into_handle_ty(),
-            ],
-        };
+        let has_state_type = schema_dsl::HasType::query_fields(&then_branch, &state_type::<PR>());
 
-        IfStateEdgePat::new(pred, inputs, then_, else_, outputs, then_arg_out, lhs)
-            .assert(same_then_index)
-            .assert(same_else_index)
-            .assert(same_arg_index)
-            .assert(same_then_value)
-            .assert(same_else_value)
-            .assert(has_state_type)
+        IfStateEdgePat::new(
+            pred,
+            inputs,
+            then_,
+            else_,
+            outputs,
+            then_arg_out,
+            lhs,
+            has_state_type,
+        )
+        .assert(same_then_index)
+        .assert(same_else_index)
+        .assert(same_arg_index)
+        .assert(same_then_value)
+        .assert(same_else_value)
     }
 
     #[eggplant::pat_vars]
@@ -461,11 +443,7 @@ pub(crate) mod native {
             ruleset,
             loop_theta_pat,
             |ctx, pat| {
-                let passthrough = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.inputs.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
+                let passthrough = ctx.insert_get(pat.inputs, ctx.devalue(pat.lhs.index));
                 ctx.union(pat.lhs, passthrough);
             },
         );
@@ -475,11 +453,7 @@ pub(crate) mod native {
             ruleset,
             switch_arg_pat,
             |ctx, pat| {
-                let passthrough = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.inputs.to_value(&ctx.ctx).val, pat.arg0_out.index.val],
-                );
+                let passthrough = ctx.insert_get(pat.inputs, ctx.devalue(pat.arg0_out.index));
                 ctx.union(pat.lhs, passthrough);
             },
         );
@@ -494,14 +468,7 @@ pub(crate) mod native {
         );
 
         PeepholeTx::add_rule("passthrough_if_arg", ruleset, if_arg_pat, |ctx, pat| {
-            let passthrough = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Get",
-                &[
-                    pat.inputs.to_value(&ctx.ctx).val,
-                    pat.then_arg_out.index.val,
-                ],
-            );
+            let passthrough = ctx.insert_get(pat.inputs, ctx.devalue(pat.then_arg_out.index));
             ctx.union(pat.lhs, passthrough);
         });
 
@@ -512,89 +479,46 @@ pub(crate) mod native {
             |ctx, pat| {
                 let passthrough_index = pat.then_arg_out.index.val;
                 let output_index = pat.lhs.index.val;
-                let new_inputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.inputs.to_value(&ctx.ctx).val, passthrough_index],
-                );
-                let new_then_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "InIf",
-                    &[
-                        ctx._intern_base::<bool, bool>(true),
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_inputs.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_else_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "InIf",
-                    &[
-                        ctx._intern_base::<bool, bool>(false),
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_inputs.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let old_then = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.inputs.to_value(&ctx).val, passthrough_index],
+                ));
+                let new_then_ctx = ctx.insert_in_if(true, pat.pred, new_inputs);
+                let new_else_ctx = ctx.insert_in_if(false, pat.pred, new_inputs);
+                let old_then = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.then_.to_value(&ctx.ctx).val, output_index],
-                );
-                let old_else = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.then_.to_value(&ctx).val, output_index],
+                ));
+                let old_else = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.else_.to_value(&ctx.ctx).val, output_index],
-                );
-                let new_then = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.else_.to_value(&ctx).val, output_index],
+                ));
+                let new_then = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAt",
                     &[
-                        new_then_ctx.to_value(&ctx.ctx).val,
+                        new_then_ctx.to_value(&ctx).val,
                         passthrough_index,
-                        old_then.to_value(&ctx.ctx).val,
+                        old_then.to_value(&ctx).val,
                     ],
-                );
-                let new_else = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let new_else = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAt",
                     &[
-                        new_else_ctx.to_value(&ctx.ctx).val,
+                        new_else_ctx.to_value(&ctx).val,
                         passthrough_index,
-                        old_else.to_value(&ctx.ctx).val,
+                        old_else.to_value(&ctx).val,
                     ],
-                );
-                let old_outputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let old_outputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.outputs.to_value(&ctx.ctx).val, output_index],
-                );
-                let new_if = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "If",
-                    &[
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_inputs.to_value(&ctx.ctx).val,
-                        new_then.to_value(&ctx.ctx).val,
-                        new_else.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let passthrough = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.inputs.to_value(&ctx.ctx).val, passthrough_index],
-                );
+                    &[pat.outputs.to_value(&ctx).val, output_index],
+                ));
+                let new_if = ctx.insert_if(pat.pred, new_inputs, new_then, new_else);
+                let passthrough = ctx.insert_get(pat.inputs, ctx.devalue(pat.then_arg_out.index));
 
                 ctx.union(new_if, old_outputs);
                 ctx.union(pat.lhs, passthrough);
-                ctx.insert_func_tbl(
-                    "ToSubsumeIf",
-                    &[
-                        pat.pred.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.then_.to_value(&ctx.ctx).val,
-                        pat.else_.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_to_subsume_if(pat.pred, pat.inputs, pat.then_, pat.else_);
             },
         );
 
@@ -603,31 +527,19 @@ pub(crate) mod native {
             ruleset,
             if_predicate_pat,
             |ctx, pat| {
-                let new_then = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_then = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.then_.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
-                let new_else = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.then_.to_value(&ctx).val, pat.lhs.index.val],
+                ));
+                let new_else = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.else_.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
-                let new_if = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "If",
-                    &[
-                        pat.pred.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        new_then.to_value(&ctx.ctx).val,
-                        new_else.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let removed = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.else_.to_value(&ctx).val, pat.lhs.index.val],
+                ));
+                let new_if = ctx.insert_if(pat.pred, pat.inputs, new_then, new_else);
+                let removed = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.if_expr.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
+                    &[pat.if_expr.to_value(&ctx).val, pat.lhs.index.val],
+                ));
                 ctx.union(pat.lhs, pat.pred);
                 ctx.union(removed, new_if);
             },
@@ -638,37 +550,21 @@ pub(crate) mod native {
             ruleset,
             if_predicate_inverted_pat,
             |ctx, pat| {
-                let new_then = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_then = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.then_.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
-                let new_else = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.then_.to_value(&ctx).val, pat.lhs.index.val],
+                ));
+                let new_else = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.else_.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
-                let new_if = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "If",
-                    &[
-                        pat.pred.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        new_then.to_value(&ctx.ctx).val,
-                        new_else.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let removed = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.else_.to_value(&ctx).val, pat.lhs.index.val],
+                ));
+                let new_if = ctx.insert_if(pat.pred, pat.inputs, new_then, new_else);
+                let removed = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TupleRemoveAt",
-                    &[pat.if_expr.to_value(&ctx.ctx).val, pat.lhs.index.val],
-                );
-                let not_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Not", &[]);
-                let inverted = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Uop",
-                    &[not_op.0.val, pat.pred.to_value(&ctx.ctx).val],
-                );
+                    &[pat.if_expr.to_value(&ctx).val, pat.lhs.index.val],
+                ));
+                let not_op = ctx.insert_not();
+                let inverted = ctx.insert_uop(not_op, pat.pred);
                 ctx.union(pat.lhs, inverted);
                 ctx.union(removed, new_if);
             },

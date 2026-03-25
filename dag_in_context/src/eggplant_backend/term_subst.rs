@@ -102,8 +102,7 @@ const TERM_SUBST_DECLS: &str = r#"(ruleset term-subst)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::{insert_call, Inserted};
-    use super::super::schema_dsl;
+    use super::super::schema_dsl::{self, HasArgTypePRRuleCtx};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
         prim_call, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
@@ -150,22 +149,15 @@ pub(crate) mod native {
         assumption: eggplant::egglog::Value,
         expr: eggplant::egglog::Value,
         term: eggplant::egglog::Value,
-    ) -> Inserted<schema_dsl::Expr> {
-        insert_call::<schema_dsl::Expr>(ctx, "TermSubst", &[assumption, expr, term])
-    }
-
-    fn insert_has_arg_type(
-        ctx: &eggplant::wrap::RuleCtx,
-        expr: eggplant::egglog::Value,
-        ty: eggplant::egglog::Value,
-    ) {
-        ctx.insert_func_tbl("HasArgType", &[expr, ty]);
+    ) -> eggplant::wrap::Value<schema_dsl::Expr> {
+        eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("TermSubst", &[assumption, expr, term]))
     }
 
     #[eggplant::pat_vars]
     struct TermSubstTypePat<PR: PatRecSgl> {
         lhs: schema_dsl::Expr,
         ty: schema_dsl::Type,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     #[eggplant::pat_vars]
@@ -182,6 +174,7 @@ pub(crate) mod native {
         expr: schema_dsl::Expr,
         constant: schema_dsl::Constant,
         ty: schema_dsl::Type,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     #[eggplant::pat_vars]
@@ -190,6 +183,7 @@ pub(crate) mod native {
         ctx: schema_dsl::Assumption,
         expr: schema_dsl::Expr,
         ty: schema_dsl::Type,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     #[eggplant::pat_vars]
@@ -282,14 +276,10 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
 
-        TermSubstTypePat::new(lhs, ty)
+        TermSubstTypePat::new(lhs, ty, has_arg_type)
             .assert(lhs_is_term_subst)
-            .assert(has_arg_type)
     }
 
     fn term_subst_arg_pat<PR: PatRecSgl>() -> TermSubstArgPat<PR> {
@@ -323,14 +313,10 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
 
-        TermSubstConstPat::new(lhs, ctx, expr, constant, ty)
+        TermSubstConstPat::new(lhs, ctx, expr, constant, ty, has_arg_type)
             .assert(lhs_is_term_subst)
-            .assert(has_arg_type)
     }
 
     fn term_subst_empty_pat<PR: PatRecSgl>() -> TermSubstEmptyPat<PR> {
@@ -346,14 +332,10 @@ pub(crate) mod native {
                 prim_call::<schema_dsl::Term>("TermEmpty", vec![]).into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
 
-        TermSubstEmptyPat::new(lhs, ctx, expr, ty)
+        TermSubstEmptyPat::new(lhs, ctx, expr, ty, has_arg_type)
             .assert(lhs_is_term_subst)
-            .assert(has_arg_type)
     }
 
     fn term_subst_top_pat<PR: PatRecSgl>() -> TermSubstTopPat<PR> {
@@ -540,17 +522,13 @@ pub(crate) mod native {
             ruleset,
             term_subst_type_pat,
             |ctx, pat| {
-                insert_has_arg_type(&ctx.ctx, pat.lhs.val, pat.ty.val);
+                ctx.insert_has_arg_type(pat.lhs, pat.ty);
             },
         );
         PeepholeTx::add_rule("term_subst_arg", ruleset, term_subst_arg_pat, |ctx, pat| {
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "AddContext",
-                    &[pat.ctx.val, pat.expr.val],
-                ),
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("AddContext", &[pat.ctx.val, pat.expr.val])),
             );
         });
         PeepholeTx::add_rule(
@@ -560,11 +538,7 @@ pub(crate) mod native {
             |ctx, pat| {
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Const",
-                        &[pat.constant.val, pat.ty.val, pat.ctx.val],
-                    ),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Const", &[pat.constant.val, pat.ty.val, pat.ctx.val])),
                 );
             },
         );
@@ -575,47 +549,39 @@ pub(crate) mod native {
             |ctx, pat| {
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(&ctx.ctx, "Empty", &[pat.ty.val, pat.ctx.val]),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Empty", &[pat.ty.val, pat.ctx.val])),
                 );
             },
         );
         PeepholeTx::add_rule("term_subst_top", ruleset, term_subst_top_pat, |ctx, pat| {
-            let a = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.a.val);
-            let b = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.b.val);
-            let c = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.c.val);
+            let a = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.a.val);
+            let b = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.b.val);
+            let c = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.c.val);
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Top",
-                    &[pat.op.val, a.0.val, b.0.val, c.0.val],
-                ),
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Top", &[pat.op.val, a.val, b.val, c.val])),
             );
         });
         PeepholeTx::add_rule("term_subst_bop", ruleset, term_subst_bop_pat, |ctx, pat| {
-            let lhs = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.lhs_term.val);
-            let rhs = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.rhs_term.val);
+            let lhs = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.lhs_term.val);
+            let rhs = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.rhs_term.val);
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[pat.op.val, lhs.0.val, rhs.0.val],
-                ),
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Bop", &[pat.op.val, lhs.val, rhs.val])),
             );
         });
         PeepholeTx::add_rule("term_subst_uop", ruleset, term_subst_uop_pat, |ctx, pat| {
-            let inner = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.term.val);
+            let inner = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Uop", &[pat.op.val, inner.0.val]),
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Uop", &[pat.op.val, inner.val])),
             );
         });
         PeepholeTx::add_rule("term_subst_get", ruleset, term_subst_get_pat, |ctx, pat| {
-            let inner = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.term.val);
+            let inner = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Get", &[inner.0.val, pat.index.val]),
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Get", &[inner.val, pat.index.val])),
             );
         });
         PeepholeTx::add_rule(
@@ -623,15 +589,11 @@ pub(crate) mod native {
             ruleset,
             term_subst_alloc_pat,
             |ctx, pat| {
-                let amount = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.amount.val);
-                let state = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.state.val);
+                let amount = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.amount.val);
+                let state = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.state.val);
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Alloc",
-                        &[pat.id.val, amount.0.val, state.0.val, pat.ty.val],
-                    ),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Alloc", &[pat.id.val, amount.val, state.val, pat.ty.val])),
                 );
             },
         );
@@ -640,10 +602,10 @@ pub(crate) mod native {
             ruleset,
             term_subst_call_pat,
             |ctx, pat| {
-                let arg = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.term.val);
+                let arg = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(&ctx.ctx, "Call", &[pat.name.val, arg.0.val]),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Call", &[pat.name.val, arg.val])),
                 );
             },
         );
@@ -652,10 +614,10 @@ pub(crate) mod native {
             ruleset,
             term_subst_single_pat,
             |ctx, pat| {
-                let inner = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.term.val);
+                let inner = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(&ctx.ctx, "Single", &[inner.0.val]),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Single", &[inner.val])),
                 );
             },
         );
@@ -664,11 +626,11 @@ pub(crate) mod native {
             ruleset,
             term_subst_concat_pat,
             |ctx, pat| {
-                let lhs = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.lhs_term.val);
-                let rhs = insert_term_subst(&ctx.ctx, pat.ctx.val, pat.expr.val, pat.rhs_term.val);
+                let lhs = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.lhs_term.val);
+                let rhs = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.rhs_term.val);
                 ctx.union(
                     pat.lhs,
-                    insert_call::<schema_dsl::Expr>(&ctx.ctx, "Concat", &[lhs.0.val, rhs.0.val]),
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Concat", &[lhs.val, rhs.val])),
                 );
             },
         );

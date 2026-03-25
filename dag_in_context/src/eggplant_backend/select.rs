@@ -137,7 +137,6 @@ const SELECT: &str = r#"(ruleset select_opt)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
@@ -145,6 +144,7 @@ pub(crate) mod native {
         RuleSetId,
     };
     use eggplant::wrap::EgglogTy;
+    use schema_dsl::{ExprPRRuleCtx, TernaryOpPRRuleCtx};
 
     #[derive(Clone, Copy, Debug)]
     struct TermAndCostTy;
@@ -164,6 +164,9 @@ pub(crate) mod native {
         t1: schema_dsl::Term,
         t2: schema_dsl::Term,
         if_out: schema_dsl::Get,
+        thn_pure: schema_dsl::ExprIsPure,
+        els_pure: schema_dsl::ExprIsPure,
+        if_context: schema_dsl::ContextOf,
     }
 
     fn select_opt_pat<PR: PatRecSgl>() -> SelectOptPat<PR> {
@@ -185,21 +188,9 @@ pub(crate) mod native {
 
         let same_then_index = if_out.handle_index().eq(&thn_out.handle_index());
         let same_else_index = if_out.handle_index().eq(&els_out.handle_index());
-        let thn_pure = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsPure",
-            operands: vec![thn_out.handle().into_handle_ty()],
-        };
-        let els_pure = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsPure",
-            operands: vec![els_out.handle().into_handle_ty()],
-        };
-        let if_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                if_e.handle().into_handle_ty(),
-                ctx.handle().into_handle_ty(),
-            ],
-        };
+        let thn_pure = schema_dsl::ExprIsPure::query_fields(&thn_out);
+        let els_pure = schema_dsl::ExprIsPure::query_fields(&els_out);
+        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
         let thn_size = size1.handle().eq(&prim_call::<i64>(
             "Expr-size",
             vec![thn_out.handle().into_handle_ty()],
@@ -227,12 +218,9 @@ pub(crate) mod native {
             vec![els_out.handle().into_handle_ty()],
         ));
 
-        SelectOptPat::new(pred, inputs, ctx, t1, t2, if_out)
+        SelectOptPat::new(pred, inputs, ctx, t1, t2, if_out, thn_pure, els_pure, if_context)
             .assert(same_then_index)
             .assert(same_else_index)
-            .assert(thn_pure)
-            .assert(els_pure)
-            .assert(if_context)
             .assert(thn_size)
             .assert(els_size)
             .assert(thn_small)
@@ -249,35 +237,24 @@ pub(crate) mod native {
             ruleset,
             select_opt_pat,
             |ctx, pat| {
-                let then_subst = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let then_subst = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TermSubst",
                     &[
-                        pat.ctx.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.t1.to_value(&ctx.ctx).val,
+                        pat.ctx.to_value(&ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.t1.to_value(&ctx).val,
                     ],
-                );
-                let else_subst = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let else_subst = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "TermSubst",
                     &[
-                        pat.ctx.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.t2.to_value(&ctx.ctx).val,
+                        pat.ctx.to_value(&ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.t2.to_value(&ctx).val,
                     ],
-                );
-                let op = insert_call::<schema_dsl::TernaryOp>(&ctx.ctx, "Select", &[]);
-                let select = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Top",
-                    &[
-                        op.0.val,
-                        pat.pred.to_value(&ctx.ctx).val,
-                        then_subst.to_value(&ctx.ctx).val,
-                        else_subst.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ));
+                let op = ctx.insert_select();
+                let select = ctx.insert_top(op, pat.pred, then_subst, else_subst);
                 ctx.union(pat.if_out, select);
             },
         );

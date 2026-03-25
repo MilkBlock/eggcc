@@ -14,7 +14,7 @@ pub(crate) fn generated_base_case_rule_for_ctor(ctor: Constructor) -> Option<Str
        (= loop (DoWhile in body))
        (= expr (Get (Arg ty ctx) i)) 
        (= expr (Get body (+ i 1))))
-      ((is-inv-Expr body expr)){ruleset})"
+      ((IsInvExpr body expr)){ruleset})"
         )),
         Constructor::Const => {
             let ctor_pattern = ctor.construct(|field| field.var());
@@ -23,7 +23,7 @@ pub(crate) fn generated_base_case_rule_for_ctor(ctor: Constructor) -> Option<Str
 (rule ((BodyContainsExpr body expr) 
        (= loop (DoWhile in body)) 
        (= expr {ctor_pattern}))
-      ((is-inv-Expr body expr)){ruleset})"
+      ((IsInvExpr body expr)){ruleset})"
             ))
         }
         _ => None,
@@ -50,7 +50,12 @@ pub(crate) fn generated_invariant_rule_for_ctor(ctor: Constructor) -> Option<Str
                     Purpose::SubExpr | Purpose::CapturedSubListExpr => {
                         let var = field.var();
                         let sort = field.sort().name();
-                        Some(format!("(is-inv-{sort} body {var})"))
+                        let rel = match sort {
+                            "Expr" => "IsInvExpr",
+                            "ListExpr" => "IsInvListExpr",
+                            other => panic!("unexpected loop invariant helper sort {other}"),
+                        };
+                        Some(format!("({rel} body {var})"))
                     }
                 })
                 .join(" ");
@@ -73,7 +78,7 @@ pub(crate) fn generated_invariant_rule_for_ctor(ctor: Constructor) -> Option<Str
        {op_is_pure} 
        {is_inv_ctor}
        {is_pure}) 
-      ((is-inv-Expr body expr))
+      ((IsInvExpr body expr))
       {ruleset})"
             ))
         }
@@ -117,10 +122,10 @@ fn simple_inv_detect() -> crate::Result {
 
     let check = format!(
         "
-    (check (is-inv-Expr {body} {}))
-    (check (is-inv-Expr {body} {}))
-    (fail (check (is-inv-Expr {body} {})))
-    (fail (check (is-inv-Expr {body} {})))
+    (check (IsInvExpr {body} {}))
+    (check (IsInvExpr {body} {}))
+    (fail (check (IsInvExpr {body} {})))
+    (fail (check (IsInvExpr {body} {})))
     ",
         getat(0).with_arg_type(inty.clone()), // first value is inv
         get(body.clone(), 2).with_arg_type(inty.clone()), // second result of loop is also inv
@@ -203,12 +208,12 @@ fn test_invariant_detect() -> crate::Result {
         cache.get_unions()
     );
     let check = "
-        (check (is-inv-Expr body basic_inv))
-        (check (is-inv-Expr body inner_inv))
-        (check (is-inv-Expr body inv))
-		(check (is-inv-Expr body inv_in_print))
-		(fail (check (is-inv-Expr body pred)))
-		(fail (check (is-inv-Expr body not_inv)))";
+        (check (IsInvExpr body basic_inv))
+        (check (IsInvExpr body inner_inv))
+        (check (IsInvExpr body inv))
+		(check (IsInvExpr body inv_in_print))
+		(fail (check (IsInvExpr body pred)))
+		(fail (check (IsInvExpr body not_inv)))";
 
     egglog_test(
         &build,

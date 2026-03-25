@@ -41,13 +41,12 @@ const INTERVAL_ANALYSIS: &str = include_str!("../interval_analysis.egg");
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
-    use super::super::schema_dsl::{self, ExprRuleCtx};
+    use super::super::schema_dsl::{self, ConstantPRRuleCtx, ExprRuleCtx};
     use crate::eggplant_backend::interval_bounds::{
         hi_bound, lo_bound, BoolB, BoolBTy, IntB, IntBTy,
     };
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{BaseVar, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     fn type_leaf<PR: PatRecSgl>() -> schema_dsl::Type<PR> {
         schema_dsl::Type::query_leaf()
@@ -71,6 +70,8 @@ pub(crate) mod native {
         ty: schema_dsl::Type,
         ctx: schema_dsl::Assumption,
         value: i64,
+        has_arg_type: schema_dsl::HasArgType,
+        context_of: schema_dsl::ContextOf,
     }
 
     #[eggplant::pat_vars]
@@ -79,6 +80,8 @@ pub(crate) mod native {
         ty: schema_dsl::Type,
         ctx: schema_dsl::Assumption,
         value: bool,
+        has_arg_type: schema_dsl::HasArgType,
+        context_of: schema_dsl::ContextOf,
     }
 
     #[eggplant::pat_vars]
@@ -86,6 +89,8 @@ pub(crate) mod native {
         expr: schema_dsl::Expr,
         ty: schema_dsl::Type,
         ctx: schema_dsl::Assumption,
+        has_arg_type: schema_dsl::HasArgType,
+        context_of: schema_dsl::ContextOf,
     }
 
     fn int_const_fold_pat<PR: PatRecSgl>() -> IntConstFoldPat<PR> {
@@ -101,25 +106,14 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_int.handle());
         let lo_value_matches = lo_int.handle_value().eq(&value.handle());
         let hi_value_matches = hi_int.handle_value().eq(&value.handle());
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
-        let context_of = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                ctx.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
 
-        IntConstFoldPat::new(expr, ty, ctx, value)
+        IntConstFoldPat::new(expr, ty, ctx, value, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(hi_matches)
             .assert(lo_value_matches)
             .assert(hi_value_matches)
-            .assert(has_arg_type)
-            .assert(context_of)
     }
 
     fn bool_const_fold_pat<PR: PatRecSgl>() -> BoolConstFoldPat<PR> {
@@ -135,25 +129,14 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&value.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&value.handle());
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
-        let context_of = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                ctx.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
 
-        BoolConstFoldPat::new(expr, ty, ctx, value)
+        BoolConstFoldPat::new(expr, ty, ctx, value, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(hi_matches)
             .assert(lo_value_matches)
             .assert(hi_value_matches)
-            .assert(has_arg_type)
-            .assert(context_of)
     }
 
     fn lower_true_pat<PR: PatRecSgl>() -> BoolKnownPat<PR> {
@@ -164,23 +147,12 @@ pub(crate) mod native {
         let lo_bool = bool_bound::<PR>();
         let lo_matches = lo.handle().eq(&lo_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&true);
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
-        let context_of = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                ctx.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
 
-        BoolKnownPat::new(expr, ty, ctx)
+        BoolKnownPat::new(expr, ty, ctx, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(lo_value_matches)
-            .assert(has_arg_type)
-            .assert(context_of)
     }
 
     fn upper_false_pat<PR: PatRecSgl>() -> BoolKnownPat<PR> {
@@ -191,23 +163,12 @@ pub(crate) mod native {
         let hi_bool = bool_bound::<PR>();
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&false);
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![expr.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
-        let context_of = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                ctx.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
 
-        BoolKnownPat::new(expr, ty, ctx)
+        BoolKnownPat::new(expr, ty, ctx, has_arg_type, context_of)
             .assert(hi_matches)
             .assert(hi_value_matches)
-            .assert(has_arg_type)
-            .assert(context_of)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
@@ -218,9 +179,8 @@ pub(crate) mod native {
             ruleset,
             int_const_fold_pat,
             |ctx, pat| {
-                let value = ctx._intern_base::<i64, i64>(ctx.devalue(pat.value));
-                let constant = insert_call::<schema_dsl::Constant>(&ctx.ctx, "Int", &[value]);
-                let folded = ctx.ctx.insert_const(constant, pat.ty, pat.ctx);
+                let constant = ctx.insert_int(ctx.devalue(pat.value));
+                let folded = ctx.insert_const(constant, pat.ty, pat.ctx);
                 ctx.union(pat.expr, folded);
             },
         );
@@ -229,9 +189,8 @@ pub(crate) mod native {
             ruleset,
             bool_const_fold_pat,
             |ctx, pat| {
-                let value = ctx._intern_base::<bool, bool>(ctx.devalue(pat.value));
-                let constant = insert_call::<schema_dsl::Constant>(&ctx.ctx, "Bool", &[value]);
-                let folded = ctx.ctx.insert_const(constant, pat.ty, pat.ctx);
+                let constant = ctx.insert_bool(ctx.devalue(pat.value));
+                let folded = ctx.insert_const(constant, pat.ty, pat.ctx);
                 ctx.union(pat.expr, folded);
             },
         );
@@ -240,9 +199,8 @@ pub(crate) mod native {
             ruleset,
             lower_true_pat,
             |ctx, pat| {
-                let value = ctx._intern_base::<bool, bool>(true);
-                let constant = insert_call::<schema_dsl::Constant>(&ctx.ctx, "Bool", &[value]);
-                let folded = ctx.ctx.insert_const(constant, pat.ty, pat.ctx);
+                let constant = ctx.insert_bool(true);
+                let folded = ctx.insert_const(constant, pat.ty, pat.ctx);
                 ctx.union(pat.expr, folded);
             },
         );
@@ -251,9 +209,8 @@ pub(crate) mod native {
             ruleset,
             upper_false_pat,
             |ctx, pat| {
-                let value = ctx._intern_base::<bool, bool>(false);
-                let constant = insert_call::<schema_dsl::Constant>(&ctx.ctx, "Bool", &[value]);
-                let folded = ctx.ctx.insert_const(constant, pat.ty, pat.ctx);
+                let constant = ctx.insert_bool(false);
+                let folded = ctx.insert_const(constant, pat.ty, pat.ctx);
                 ctx.union(pat.expr, folded);
             },
         );

@@ -125,11 +125,11 @@ const HACKERS_DELIGHT: &str = r#";; Hacker's delight optimizations
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use crate::eggplant_backend::schema_dsl::{IsIsEvenPRRuleCtx, NTZIterationsPRRuleCtx};
     use eggplant::prelude::{
-        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, BaseVar, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -182,6 +182,8 @@ pub(crate) mod native {
         lp_input_j: schema_dsl::Get,
         arg_i: schema_dsl::Get,
         two: schema_dsl::Const,
+        cond_is_even: schema_dsl::IsIsEven,
+        pred_is_even: schema_dsl::IsIsEven,
     }
 
     fn ntz_iterations_pat<PR: PatRecSgl>() -> NtzIterationsPat<PR> {
@@ -192,10 +194,7 @@ pub(crate) mod native {
         let outerif = schema_dsl::If::query(&cond, &inputs, &evenbr, &oddbr);
 
         let n = schema_dsl::Get::query(&inputs);
-        let cond_is_even = eggplant::wrap::FactCallConstraint {
-            op: "IsIsEven",
-            operands: vec![cond.handle().into_handle_ty(), n.handle().into_handle_ty()],
-        };
+        let cond_is_even = schema_dsl::IsIsEven::query_fields(&cond, &n);
 
         let lp_inputs = schema_dsl::Expr::query_leaf();
         let lp_pred_outputs = schema_dsl::Expr::query_leaf();
@@ -214,13 +213,7 @@ pub(crate) mod native {
         let nd2 = schema_dsl::Bop::query(&schema_dsl::Div::query(), &arg_j, &two);
         let pred0 = schema_dsl::Get::query(&lp_pred_outputs);
         let pred0_is_first = pred0.handle_index().eq(&(&0_i64).as_handle());
-        let pred_is_even = eggplant::wrap::FactCallConstraint {
-            op: "IsIsEven",
-            operands: vec![
-                pred0.handle().into_handle_ty(),
-                nd2.handle().into_handle_ty(),
-            ],
-        };
+        let pred_is_even = schema_dsl::IsIsEven::query_fields(&pred0, &nd2);
         let pred_next = schema_dsl::Get::query(&lp_pred_outputs);
         let pred_next_matches = pred_next.handle().eq(&nd2.handle());
         let pred_next_index_matches = pred_next
@@ -231,15 +224,13 @@ pub(crate) mod native {
         let odd_index_matches = odd_j.handle_index().eq(&lp_input_j.handle_index());
         let odd_matches_outer = odd_j.handle().eq(&arg_i.handle());
 
-        NtzIterationsPat::new(outerif, n, lp_input_j, arg_i, two)
-            .assert(cond_is_even)
+        NtzIterationsPat::new(outerif, n, lp_input_j, arg_i, two, cond_is_even, pred_is_even)
             .assert(even_branch_matches)
             .assert(same_outer_index)
             .assert(same_loop_input_value)
             .assert(same_loop_index)
             .assert(two_matches_value)
             .assert(pred0_is_first)
-            .assert(pred_is_even)
             .assert(pred_next_matches)
             .assert(pred_next_index_matches)
             .assert(odd_index_matches)
@@ -255,6 +246,7 @@ pub(crate) mod native {
         one: schema_dsl::Const,
         two: schema_dsl::Const,
         one_else: schema_dsl::Const,
+        ntz: schema_dsl::NTZIterations,
     }
 
     fn lowbit_pat<PR: PatRecSgl>() -> LowbitPat<PR> {
@@ -266,14 +258,9 @@ pub(crate) mod native {
 
         let n = schema_dsl::Expr::query_leaf();
         let outer_i = schema_dsl::Get::query(&outerif);
-        let ntz = eggplant::wrap::FactCallConstraint {
-            op: "NTZIterations",
-            operands: vec![
-                outerif.handle().into_handle_ty(),
-                n.handle().into_handle_ty(),
-                outer_i.handle_index().into_handle_ty(),
-            ],
-        };
+        let ntz_index = BaseVar::<i64, PR>::query_named("ntz_index");
+        let ntz = schema_dsl::NTZIterations::query_fields(&outerif, &n, &ntz_index);
+        let outer_i_index_matches = outer_i.handle_index().eq(&ntz.handle_index());
 
         let lp_inputs = schema_dsl::Expr::query_leaf();
         let lp_pred_outputs = schema_dsl::Expr::query_leaf();
@@ -302,8 +289,8 @@ pub(crate) mod native {
         let outer_j = schema_dsl::Get::query(&outerif);
         let outer_j_index_matches = outer_j.handle_index().eq(&lp_input_j.handle_index());
 
-        LowbitPat::new(n, outer_i, outer_j, lp_inputs, one, two, one_else)
-            .assert(ntz)
+        LowbitPat::new(n, outer_i, outer_j, lp_inputs, one, two, one_else, ntz)
+            .assert(outer_i_index_matches)
             .assert(even_branch_matches)
             .assert(loop_input_is_one)
             .assert(one_matches_value)
@@ -324,6 +311,8 @@ pub(crate) mod native {
         lpinputs: schema_dsl::Expr,
         pred_outputs: schema_dsl::Expr,
         arg_j: schema_dsl::Get,
+        has_state_type: schema_dsl::HasType,
+        ntz: schema_dsl::NTZIterations,
     }
 
     fn hacker_loop_state_edge_pat<PR: PatRecSgl>() -> HackerLoopStateEdgePat<PR> {
@@ -334,14 +323,9 @@ pub(crate) mod native {
         let anyif = schema_dsl::If::query(&cond, &inputs, &thenbr, &elsebr);
         let n = schema_dsl::Expr::query_leaf();
         let outer_i = schema_dsl::Get::query(&anyif);
-        let ntz = eggplant::wrap::FactCallConstraint {
-            op: "NTZIterations",
-            operands: vec![
-                anyif.handle().into_handle_ty(),
-                n.handle().into_handle_ty(),
-                outer_i.handle_index().into_handle_ty(),
-            ],
-        };
+        let ntz_index = BaseVar::<i64, PR>::query_named("ntz_index");
+        let ntz = schema_dsl::NTZIterations::query_fields(&anyif, &n, &ntz_index);
+        let outer_i_index_matches = outer_i.handle_index().eq(&ntz.handle_index());
 
         let lpinputs = schema_dsl::Expr::query_leaf();
         let pred_outputs = schema_dsl::Expr::query_leaf();
@@ -354,30 +338,20 @@ pub(crate) mod native {
         let pred_next_index_matches = pred_next
             .handle_index()
             .eq(&(arg_j.handle_index() + (&1_i64).as_handle()));
-        let has_state_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                pred_next.handle().into_handle_ty(),
-                state_type::<PR>().handle().into_handle_ty(),
-            ],
-        };
+        let has_state_type = schema_dsl::HasType::query_fields(&pred_next, &state_type::<PR>());
 
-        HackerLoopStateEdgePat::new(n, thenbr, lpinputs, pred_outputs, arg_j)
-            .assert(ntz)
+        HackerLoopStateEdgePat::new(n, thenbr, lpinputs, pred_outputs, arg_j, has_state_type, ntz)
+            .assert(outer_i_index_matches)
             .assert(then_branch_matches)
             .assert(pred_next_matches)
             .assert(pred_next_index_matches)
-            .assert(has_state_type)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
         let ruleset = PeepholeTx::new_ruleset("hacker");
 
         PeepholeTx::add_rule("hacker_is_even", ruleset, is_even_pat, |ctx, pat| {
-            ctx.insert_func_tbl(
-                "IsIsEven",
-                &[pat.e.to_value(&ctx.ctx).val, pat.x.to_value(&ctx.ctx).val],
-            );
+            ctx.insert_is_is_even(pat.e, pat.x);
         });
 
         PeepholeTx::add_rule(
@@ -385,44 +359,31 @@ pub(crate) mod native {
             ruleset,
             ntz_iterations_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "NTZIterations",
-                    &[
-                        pat.outerif.to_value(&ctx.ctx).val,
-                        pat.n.to_value(&ctx.ctx).val,
-                        pat.lp_input_j.index.val,
-                    ],
-                );
+                ctx.insert_ntz_iterations(pat.outerif, pat.n, ctx.devalue(pat.lp_input_j.index));
             },
         );
 
         PeepholeTx::add_rule("hacker_lowbit", ruleset, lowbit_pat, |ctx, pat| {
-            let neg_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Neg", &[]);
-            let neg_n = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Uop",
-                &[neg_op.0.val, pat.n.to_value(&ctx.ctx).val],
+            let neg_op =
+                eggplant::wrap::Value::<schema_dsl::UnaryOp>::new((ctx).insert("Neg", &[]));
+            let neg_n = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Uop", &[neg_op.val, pat.n.to_value(&ctx).val]),
             );
-            let bitand = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Bitand", &[]);
-            let lowbit = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let bitand =
+                eggplant::wrap::Value::<schema_dsl::BinaryOp>::new((ctx).insert("Bitand", &[]));
+            let lowbit = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "Bop",
                 &[
-                    bitand.0.val,
-                    pat.n.to_value(&ctx.ctx).val,
-                    neg_n.to_value(&ctx.ctx).val,
+                    bitand.val,
+                    pat.n.to_value(&ctx).val,
+                    neg_n.to_value(&ctx).val,
                 ],
-            );
-            let div = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Div", &[]);
-            let ntz = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let div = eggplant::wrap::Value::<schema_dsl::BinaryOp>::new((ctx).insert("Div", &[]));
+            let ntz = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "Bop",
-                &[
-                    div.0.val,
-                    pat.n.to_value(&ctx.ctx).val,
-                    lowbit.to_value(&ctx.ctx).val,
-                ],
-            );
+                &[div.val, pat.n.to_value(&ctx).val, lowbit.to_value(&ctx).val],
+            ));
 
             ctx.union(pat.outer_j, lowbit);
             ctx.union(pat.outer_i, ntz);
@@ -437,68 +398,57 @@ pub(crate) mod native {
                 let j_val = ctx._intern_base::<i64, i64>(j);
                 let j_plus_one = ctx._intern_base::<i64, i64>(j + 1);
 
-                let new_lp_inputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "TupleRemoveAt",
-                    &[pat.lpinputs.to_value(&ctx.ctx).val, j_val],
+                let new_lp_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("TupleRemoveAt", &[pat.lpinputs.to_value(&ctx).val, j_val]),
                 );
-                let new_pred_outputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "TupleRemoveAt",
-                    &[pat.pred_outputs.to_value(&ctx.ctx).val, j_plus_one],
-                );
-                let new_loop_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "DummyLoopContext",
-                    &[
-                        new_lp_inputs.to_value(&ctx.ctx).val,
-                        new_pred_outputs.to_value(&ctx.ctx).val,
-                        pat.pred_outputs.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_pred_outputs =
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                        "TupleRemoveAt",
+                        &[pat.pred_outputs.to_value(&ctx).val, j_plus_one],
+                    ));
+                let new_loop_ctx =
+                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
+                        "DummyLoopContext",
+                        &[
+                            new_lp_inputs.to_value(&ctx).val,
+                            new_pred_outputs.to_value(&ctx).val,
+                            pat.pred_outputs.to_value(&ctx).val,
+                        ],
+                    ));
+                let new_body = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAt",
                     &[
-                        new_loop_ctx.to_value(&ctx.ctx).val,
+                        new_loop_ctx.to_value(&ctx).val,
                         j_val,
-                        new_pred_outputs.to_value(&ctx.ctx).val,
+                        new_pred_outputs.to_value(&ctx).val,
                     ],
-                );
-                let loop_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                ));
+                let loop_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InLoop",
                     &[
-                        new_lp_inputs.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
+                        new_lp_inputs.to_value(&ctx).val,
+                        new_body.to_value(&ctx).val,
                     ],
-                );
+                ));
                 ctx.union(new_loop_ctx, loop_ctx);
 
-                let new_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DoWhile",
                     &[
-                        new_lp_inputs.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
+                        new_lp_inputs.to_value(&ctx).val,
+                        new_body.to_value(&ctx).val,
                     ],
-                );
-                let old_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "TupleRemoveAt",
-                    &[pat.thenbr.to_value(&ctx.ctx).val, j_val],
+                ));
+                let old_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("TupleRemoveAt", &[pat.thenbr.to_value(&ctx).val, j_val]),
                 );
                 ctx.union(new_loop, old_loop);
 
-                let then_state = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.thenbr.to_value(&ctx.ctx).val, j_val],
+                let then_state = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("Get", &[pat.thenbr.to_value(&ctx).val, j_val]),
                 );
-                let input_state = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.lpinputs.to_value(&ctx.ctx).val, j_val],
+                let input_state = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("Get", &[pat.lpinputs.to_value(&ctx).val, j_val]),
                 );
                 ctx.union(then_state, input_state);
             },

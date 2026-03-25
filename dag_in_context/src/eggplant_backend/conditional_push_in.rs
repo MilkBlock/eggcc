@@ -98,10 +98,9 @@ const CONDITIONAL_PUSH_IN: &str = r#"(ruleset push-in)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct PushInPat<PR: PatRecSgl> {
@@ -110,10 +109,15 @@ pub(crate) mod native {
         orig_inputs: schema_dsl::Expr,
         thn: schema_dsl::Expr,
         els: schema_dsl::Expr,
+        if_context: schema_dsl::ContextOf,
+        then_arg_type: schema_dsl::HasArgType,
+        else_arg_type: schema_dsl::HasArgType,
         op: schema_dsl::BinaryOp,
         constant: schema_dsl::Constant,
         x: schema_dsl::Expr,
         x_ty: schema_dsl::BaseType,
+        x_has_type: schema_dsl::HasType,
+        pure_base: schema_dsl::PureBaseType,
         tylist: schema_dsl::TypeList,
         orig_input_i: schema_dsl::Get,
     }
@@ -138,39 +142,12 @@ pub(crate) mod native {
         let x_ty = schema_dsl::BaseType::query_leaf();
         let x_ty_expr = schema_dsl::Base::query(&x_ty);
 
-        let if_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                if_e.handle().into_handle_ty(),
-                outer_ctx.handle().into_handle_ty(),
-            ],
-        };
+        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &outer_ctx);
         let input_matches = orig_input_i.handle().eq(&pushed_expr.handle());
-        let then_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                thn.handle().into_handle_ty(),
-                branch_arg_ty.handle().into_handle_ty(),
-            ],
-        };
-        let else_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                els.handle().into_handle_ty(),
-                branch_arg_ty.handle().into_handle_ty(),
-            ],
-        };
-        let x_has_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                x.handle().into_handle_ty(),
-                x_ty_expr.handle().into_handle_ty(),
-            ],
-        };
-        let pure_base = eggplant::wrap::FactCallConstraint {
-            op: "PureBaseType",
-            operands: vec![x_ty.handle().into_handle_ty()],
-        };
+        let then_arg_type = schema_dsl::HasArgType::query_fields(&thn, &branch_arg_ty);
+        let else_arg_type = schema_dsl::HasArgType::query_fields(&els, &branch_arg_ty);
+        let x_has_type = schema_dsl::HasType::query_fields(&x, &x_ty_expr);
+        let pure_base = schema_dsl::PureBaseType::query_fields(&x_ty);
 
         PushInPat::new(
             if_e,
@@ -178,19 +155,19 @@ pub(crate) mod native {
             orig_inputs,
             thn,
             els,
+            if_context,
+            then_arg_type,
+            else_arg_type,
             op,
             constant,
             x,
             x_ty,
+            x_has_type,
+            pure_base,
             tylist,
             orig_input_i,
         )
-        .assert(if_context)
         .assert(input_matches)
-        .assert(then_arg_type)
-        .assert(else_arg_type)
-        .assert(x_has_type)
-        .assert(pure_base)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
@@ -203,174 +180,149 @@ pub(crate) mod native {
             |ctx, pat| {
                 let zero = ctx._intern_base::<i64, i64>(0);
                 let orig_ins_len =
-                    ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx.ctx).val]);
+                    ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx).val]);
 
-                let tnil = insert_call::<schema_dsl::TypeList>(&ctx.ctx, "TNil", &[]);
-                let appended_tail = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
-                    "TCons",
-                    &[pat.x_ty.to_value(&ctx.ctx).val, tnil.0.val],
+                let tnil =
+                    eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
+                let appended_tail = eggplant::wrap::Value::<schema_dsl::TypeList>::new(
+                    (&ctx).insert("TCons", &[pat.x_ty.to_value(&ctx).val, tnil.val]),
                 );
-                let new_tylist = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
+                let new_tylist = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert(
                     "TLConcat",
                     &[
-                        pat.tylist.to_value(&ctx.ctx).val,
-                        appended_tail.to_value(&ctx.ctx).val,
+                        pat.tylist.to_value(&ctx).val,
+                        appended_tail.to_value(&ctx).val,
                     ],
+                ));
+                let new_ins_ty = eggplant::wrap::Value::<schema_dsl::Type>::new(
+                    (ctx).insert("TupleT", &[new_tylist.val]),
                 );
-                let new_ins_ty =
-                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_tylist.0.val]);
-                let new_ins = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Concat",
-                    &[
-                        pat.orig_inputs.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Single",
-                            &[pat.x.to_value(&ctx.ctx).val],
-                        )
-                        .to_value(&ctx.ctx)
-                        .val,
-                    ],
+                let new_ins = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Concat",
+                        &[
+                            pat.orig_inputs.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                (&ctx).insert("Single", &[pat.x.to_value(&ctx).val]),
+                            )
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
                 );
 
-                let if_tr = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                let if_tr = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InIf",
                     &[
-                        true.to_value(&ctx.ctx).val,
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_ins.to_value(&ctx.ctx).val,
+                        true.to_value(&ctx).val,
+                        pat.pred.to_value(&ctx).val,
+                        new_ins.to_value(&ctx).val,
                     ],
-                );
-                let if_fa = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                ));
+                let if_fa = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InIf",
                     &[
-                        false.to_value(&ctx.ctx).val,
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_ins.to_value(&ctx.ctx).val,
+                        false.to_value(&ctx).val,
+                        pat.pred.to_value(&ctx).val,
+                        new_ins.to_value(&ctx).val,
                     ],
-                );
+                ));
 
-                let arg_tr = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let arg_tr = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Arg",
-                    &[
-                        new_ins_ty.to_value(&ctx.ctx).val,
-                        if_tr.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let arg_fa = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[new_ins_ty.to_value(&ctx).val, if_tr.to_value(&ctx).val],
+                ));
+                let arg_fa = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Arg",
-                    &[
-                        new_ins_ty.to_value(&ctx.ctx).val,
-                        if_fa.to_value(&ctx.ctx).val,
-                    ],
+                    &[new_ins_ty.to_value(&ctx).val, if_fa.to_value(&ctx).val],
+                ));
+                let st_tr = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("SubTuple", &[arg_tr.to_value(&ctx).val, zero, orig_ins_len]),
                 );
-                let st_tr = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "SubTuple",
-                    &[arg_tr.to_value(&ctx.ctx).val, zero, orig_ins_len],
+                let st_fa = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("SubTuple", &[arg_fa.to_value(&ctx).val, zero, orig_ins_len]),
                 );
-                let st_fa = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "SubTuple",
-                    &[arg_fa.to_value(&ctx.ctx).val, zero, orig_ins_len],
-                );
-                let new_thn = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_thn = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        if_tr.to_value(&ctx.ctx).val,
-                        st_tr.to_value(&ctx.ctx).val,
-                        pat.thn.to_value(&ctx.ctx).val,
+                        if_tr.to_value(&ctx).val,
+                        st_tr.to_value(&ctx).val,
+                        pat.thn.to_value(&ctx).val,
                     ],
-                );
-                let new_els = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let new_els = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        if_fa.to_value(&ctx.ctx).val,
-                        st_fa.to_value(&ctx.ctx).val,
-                        pat.els.to_value(&ctx.ctx).val,
+                        if_fa.to_value(&ctx).val,
+                        st_fa.to_value(&ctx).val,
+                        pat.els.to_value(&ctx).val,
                     ],
-                );
+                ));
 
-                let tr_replaced = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let tr_replaced = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Get",
-                    &[arg_tr.to_value(&ctx.ctx).val, pat.orig_input_i.index.val],
-                );
-                let fa_replaced = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[arg_tr.to_value(&ctx).val, pat.orig_input_i.index.val],
+                ));
+                let fa_replaced = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Get",
-                    &[arg_fa.to_value(&ctx.ctx).val, pat.orig_input_i.index.val],
-                );
-                let tr_const = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[arg_fa.to_value(&ctx).val, pat.orig_input_i.index.val],
+                ));
+                let tr_const = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Const",
                     &[
-                        pat.constant.to_value(&ctx.ctx).val,
-                        new_ins_ty.to_value(&ctx.ctx).val,
-                        if_tr.to_value(&ctx.ctx).val,
+                        pat.constant.to_value(&ctx).val,
+                        new_ins_ty.to_value(&ctx).val,
+                        if_tr.to_value(&ctx).val,
                     ],
-                );
-                let fa_const = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let fa_const = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Const",
                     &[
-                        pat.constant.to_value(&ctx.ctx).val,
-                        new_ins_ty.to_value(&ctx.ctx).val,
-                        if_fa.to_value(&ctx.ctx).val,
+                        pat.constant.to_value(&ctx).val,
+                        new_ins_ty.to_value(&ctx).val,
+                        if_fa.to_value(&ctx).val,
                     ],
+                ));
+                let tr_rhs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Bop",
+                        &[
+                            pat.op.to_value(&ctx).val,
+                            tr_const.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                (&ctx).insert("Get", &[arg_tr.to_value(&ctx).val, orig_ins_len]),
+                            )
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
                 );
-                let tr_rhs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        pat.op.to_value(&ctx.ctx).val,
-                        tr_const.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Get",
-                            &[arg_tr.to_value(&ctx.ctx).val, orig_ins_len],
-                        )
-                        .to_value(&ctx.ctx)
-                        .val,
-                    ],
-                );
-                let fa_rhs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        pat.op.to_value(&ctx.ctx).val,
-                        fa_const.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Get",
-                            &[arg_fa.to_value(&ctx.ctx).val, orig_ins_len],
-                        )
-                        .to_value(&ctx.ctx)
-                        .val,
-                    ],
+                let fa_rhs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Bop",
+                        &[
+                            pat.op.to_value(&ctx).val,
+                            fa_const.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                (&ctx).insert("Get", &[arg_fa.to_value(&ctx).val, orig_ins_len]),
+                            )
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
                 );
                 ctx.union(tr_replaced, tr_rhs);
                 ctx.union(fa_replaced, fa_rhs);
 
-                let new_if = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let new_if = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "If",
                     &[
-                        pat.pred.to_value(&ctx.ctx).val,
-                        new_ins.to_value(&ctx.ctx).val,
-                        new_thn.to_value(&ctx.ctx).val,
-                        new_els.to_value(&ctx.ctx).val,
+                        pat.pred.to_value(&ctx).val,
+                        new_ins.to_value(&ctx).val,
+                        new_thn.to_value(&ctx).val,
+                        new_els.to_value(&ctx).val,
                     ],
-                );
+                ));
                 ctx.union(pat.if_e, new_if);
             },
         );

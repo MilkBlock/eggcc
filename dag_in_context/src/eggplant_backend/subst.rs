@@ -286,7 +286,6 @@ const SUBST_EMPTY_LEAF_RULE: &str = r#"(rule ((= lhs (Subst assum to e))
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl::{self, ExprRuleCtx};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{prim_call, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
@@ -314,6 +313,8 @@ pub(crate) mod native {
         input: schema_dsl::Expr,
         ty: schema_dsl::Type,
         ctx: schema_dsl::Assumption,
+        has_arg_type: schema_dsl::HasArgType,
+        context_of: schema_dsl::ContextOf,
     }
 
     #[eggplant::pat_vars]
@@ -324,6 +325,7 @@ pub(crate) mod native {
         input: schema_dsl::Expr,
         constant: schema_dsl::Constant,
         new_ty: schema_dsl::Type,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     #[eggplant::pat_vars]
@@ -341,6 +343,7 @@ pub(crate) mod native {
         to: schema_dsl::Expr,
         input: schema_dsl::Expr,
         new_ty: schema_dsl::Type,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     fn if_subst_pat<PR: PatRecSgl>() -> IfSubstPat<PR> {
@@ -356,19 +359,10 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![to.handle().into_handle_ty(), ty.handle().into_handle_ty()],
-        };
-        let context_of = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![to.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&to, &ty);
+        let context_of = schema_dsl::ContextOf::query_fields(&to, &ctx);
 
-        IfSubstPat::new(lhs, to, input, ty, ctx)
-            .assert(lhs_is_if_subst)
-            .assert(has_arg_type)
-            .assert(context_of)
+        IfSubstPat::new(lhs, to, input, ty, ctx, has_arg_type, context_of).assert(lhs_is_if_subst)
     }
 
     fn subst_const_pat<PR: PatRecSgl>() -> SubstConstPat<PR> {
@@ -391,18 +385,11 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                to.handle().into_handle_ty(),
-                new_ty.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&to, &new_ty);
 
-        SubstConstPat::new(lhs, assum, to, input, constant, new_ty)
+        SubstConstPat::new(lhs, assum, to, input, constant, new_ty, has_arg_type)
             .assert(input_is_const)
             .assert(lhs_is_subst)
-            .assert(has_arg_type)
     }
 
     fn subst_arg_pat<PR: PatRecSgl>() -> SubstArgPat<PR> {
@@ -448,18 +435,11 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                to.handle().into_handle_ty(),
-                new_ty.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&to, &new_ty);
 
-        SubstEmptyPat::new(lhs, assum, to, input, new_ty)
+        SubstEmptyPat::new(lhs, assum, to, input, new_ty, has_arg_type)
             .assert(input_is_empty)
             .assert(lhs_is_subst)
-            .assert(has_arg_type)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
@@ -467,52 +447,41 @@ pub(crate) mod native {
 
         PeepholeTx::add_rule("subst_if_subst", ruleset, if_subst_pat, |ctx, pat| {
             let true_value = ctx._intern_base::<bool, bool>(true);
-            let constant = insert_call::<schema_dsl::Constant>(&ctx.ctx, "Bool", &[true_value]);
-            let condition = ctx.ctx.insert_const(constant, pat.ty, pat.ctx);
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let constant = eggplant::wrap::Value::<schema_dsl::Constant>::new(
+                (ctx).insert("Bool", &[true_value]),
+            );
+            let condition = ctx.insert_const(constant, pat.ty, pat.ctx);
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "If",
                 &[condition.val, pat.to.val, pat.input.val, pat.input.val],
-            );
+            ));
 
             ctx.union(pat.lhs, rewritten);
         });
         PeepholeTx::add_rule("subst_arg_leaf", ruleset, subst_arg_pat, |ctx, pat| {
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "AddContext",
-                &[pat.assum.val, pat.to.val],
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("AddContext", &[pat.assum.val, pat.to.val]),
             );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedSubstUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedSubstUnion", &[pat.lhs.val, rewritten.val]),
             );
             ctx.subsume("Subst", &[pat.assum.val, pat.to.val, pat.input.val]);
         });
         PeepholeTx::add_rule("subst_const_leaf", ruleset, subst_const_pat, |ctx, pat| {
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Const",
-                &[pat.constant.val, pat.new_ty.val, pat.assum.val],
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Const", &[pat.constant.val, pat.new_ty.val, pat.assum.val]),
             );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedSubstUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedSubstUnion", &[pat.lhs.val, rewritten.val]),
             );
             ctx.subsume("Subst", &[pat.assum.val, pat.to.val, pat.input.val]);
         });
         PeepholeTx::add_rule("subst_empty_leaf", ruleset, subst_empty_pat, |ctx, pat| {
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Empty",
-                &[pat.new_ty.val, pat.assum.val],
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Empty", &[pat.new_ty.val, pat.assum.val]),
             );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedSubstUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedSubstUnion", &[pat.lhs.val, rewritten.val]),
             );
             ctx.subsume("Subst", &[pat.assum.val, pat.to.val, pat.input.val]);
         });

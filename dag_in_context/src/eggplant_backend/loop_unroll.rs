@@ -172,8 +172,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
-    use super::super::schema_dsl;
+        use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
         AsHandle, BaseVar, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
@@ -258,58 +257,34 @@ pub(crate) mod native {
                 return;
             }
 
-            let inputs = pat.inputs.to_value(&ctx.ctx).val;
-            let outputs = pat.outputs.to_value(&ctx.ctx).val;
+            let inputs = pat.inputs.to_value(&ctx).val;
+            let outputs = pat.outputs.to_value(&ctx).val;
             let num_inputs = ctx.lookup_expect("tuple-length", &[inputs]);
             let Some(old_cost_value) = ctx.lookup("LoopNumItersGuess", &[inputs, outputs]) else {
                 return;
             };
             let old_cost = ctx._devalue_base::<i64>(old_cost_value);
 
-            let one_iter = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "SubTuple",
-                &[outputs, ctx._intern_base::<i64, i64>(1), num_inputs],
-            );
-            let tmp_ctx = insert_call::<schema_dsl::Assumption>(&ctx.ctx, "LoopUnrollTmpCtx", &[]);
+            let one_iter = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[outputs, ctx._intern_base::<i64, i64>(1), num_inputs]));
+            let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("LoopUnrollTmpCtx", &[]));
 
-            let subst_once = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Subst",
-                &[
-                    tmp_ctx.to_value(&ctx.ctx).val,
-                    one_iter.to_value(&ctx.ctx).val,
+            let subst_once = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                    tmp_ctx.to_value(&ctx).val,
+                    one_iter.to_value(&ctx).val,
                     outputs,
-                ],
-            );
-            let subst_twice = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Subst",
-                &[
-                    tmp_ctx.to_value(&ctx.ctx).val,
-                    one_iter.to_value(&ctx.ctx).val,
-                    subst_once.to_value(&ctx.ctx).val,
-                ],
-            );
-            let unrolled = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Subst",
-                &[
-                    tmp_ctx.to_value(&ctx.ctx).val,
-                    one_iter.to_value(&ctx.ctx).val,
-                    subst_twice.to_value(&ctx.ctx).val,
-                ],
-            );
-            let new_loop = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DoWhile",
-                &[inputs, unrolled.to_value(&ctx.ctx).val],
-            );
-            let actual_ctx = insert_call::<schema_dsl::Assumption>(
-                &ctx.ctx,
-                "InLoop",
-                &[inputs, unrolled.to_value(&ctx.ctx).val],
-            );
+                ]));
+            let subst_twice = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                    tmp_ctx.to_value(&ctx).val,
+                    one_iter.to_value(&ctx).val,
+                    subst_once.to_value(&ctx).val,
+                ]));
+            let unrolled = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                    tmp_ctx.to_value(&ctx).val,
+                    one_iter.to_value(&ctx).val,
+                    subst_twice.to_value(&ctx).val,
+                ]));
+            let new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("DoWhile", &[inputs, unrolled.to_value(&ctx).val]));
+            let actual_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InLoop", &[inputs, unrolled.to_value(&ctx).val]));
 
             ctx.union(pat.lhs, new_loop);
             ctx.union(tmp_ctx, actual_ctx);
@@ -317,7 +292,7 @@ pub(crate) mod native {
                 "LoopNumItersGuess",
                 &[
                     inputs,
-                    unrolled.to_value(&ctx.ctx).val,
+                    unrolled.to_value(&ctx).val,
                     ctx._intern_base::<i64, i64>(old_cost / 4),
                 ],
             );

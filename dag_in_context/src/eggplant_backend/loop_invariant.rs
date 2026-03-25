@@ -37,10 +37,10 @@ const LOOP_INVARIANT_SUPPORT: &str = r#";; Loop Invariant
 
 ;; For a loop body, this expression is invariant (calculates the same value every loop)
 ;;                     body, inv-expr
-(relation is-inv-Expr (Expr Expr))
-(relation is-inv-ListExpr (Expr ListExpr))
+(relation IsInvExpr (Expr Expr))
+(relation IsInvListExpr (Expr ListExpr))
 
-(relation is-inv-ListExpr-helper (Expr ListExpr i64))
+(relation IsInvListExprHelper (Expr ListExpr i64))
 
 
 (ruleset loop-invariant-generated)
@@ -62,20 +62,20 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
 
 ;; For a loop body, this expression is invariant (calculates the same value every loop)
 ;;                     body, inv-expr
-(relation is-inv-Expr (Expr Expr))
-(relation is-inv-ListExpr (Expr ListExpr))
+(relation IsInvExpr (Expr Expr))
+(relation IsInvListExpr (Expr ListExpr))
 
-(relation is-inv-ListExpr-helper (Expr ListExpr i64))
+(relation IsInvListExprHelper (Expr ListExpr i64))
 (rule ((BodyContainsListExpr body list) ) 
-      ((is-inv-ListExpr-helper body list 0)) :ruleset always-run)
+      ((IsInvListExprHelper body list 0)) :ruleset always-run)
 
-(rule ((is-inv-ListExpr-helper body list i)
-       (is-inv-Expr body (ListExpr-ith list i)))
-    ((is-inv-ListExpr-helper body list (+ i 1))) :ruleset always-run)
+(rule ((IsInvListExprHelper body list i)
+       (IsInvExpr body (ListExpr-ith list i)))
+    ((IsInvListExprHelper body list (+ i 1))) :ruleset always-run)
 
-(rule ((is-inv-ListExpr-helper body list i)
+(rule ((IsInvListExprHelper body list i)
        (= i (ListExpr-length list)))
-    ((is-inv-ListExpr body list)) :ruleset always-run)
+    ((IsInvListExpr body list)) :ruleset always-run)
 
 
 (ruleset loop-invariant-generated)
@@ -93,7 +93,7 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
 
 ;; figure out max cost of invariant to hoist
 ;; pick a random invariant expression
-(rule ((is-inv-Expr body expr)
+(rule ((IsInvExpr body expr)
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
@@ -101,7 +101,7 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
       ((set (to-hoist-size inputs body) size)) :ruleset boundary-analysis-prep)
 
 ;; pick a bigger one if possible
-(rule ((is-inv-Expr body expr)
+(rule ((IsInvExpr body expr)
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
@@ -152,9 +152,12 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use crate::eggplant_backend::schema_dsl::{
+        AssumptionPRRuleCtx, ExprPRRuleCtx, IsInvExprPRRuleCtx, IsInvListExprHelperPRRuleCtx,
+        IsInvListExprPRRuleCtx, TypeListPRRuleCtx, TypePRRuleCtx,
+    };
     use eggplant::prelude::{
         prim_call, AsHandle, BaseVar, Compare, Insertable, IntoHandleTy, PEq, PatRecSgl,
         RuleRunnerSgl, RuleSetId,
@@ -164,6 +167,7 @@ pub(crate) mod native {
     struct LoopInvariantListHelperSeedPat<PR: PatRecSgl> {
         body: schema_dsl::Expr,
         list: schema_dsl::ListExpr,
+        body_contains_list: schema_dsl::BodyContainsListExpr,
     }
 
     fn loop_invariant_list_helper_seed_pat<PR: PatRecSgl>() -> LoopInvariantListHelperSeedPat<PR> {
@@ -171,7 +175,7 @@ pub(crate) mod native {
         let list = schema_dsl::ListExpr::query_leaf();
         let body_contains_list = body_contains_list_expr(&body, &list);
 
-        LoopInvariantListHelperSeedPat::new(body, list).assert(body_contains_list)
+        LoopInvariantListHelperSeedPat::new(body, list, body_contains_list)
     }
 
     #[eggplant::pat_vars]
@@ -179,6 +183,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         list: schema_dsl::ListExpr,
         i: i64,
+        ith_expr: schema_dsl::Expr,
+        helper_entry: schema_dsl::IsInvListExprHelper,
+        ith_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_list_helper_recurse_pat<PR: PatRecSgl>(
@@ -186,35 +193,23 @@ pub(crate) mod native {
         let body = schema_dsl::Expr::query_leaf();
         let list = schema_dsl::ListExpr::query_leaf();
         let i = BaseVar::<i64, PR>::query_named("list_index");
-        let helper_entry = eggplant::wrap::FactCallConstraint {
-            op: "is-inv-ListExpr-helper",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                list.handle().into_handle_ty(),
-                i.handle().into_handle_ty(),
-            ],
-        };
-        let ith_is_inv = eggplant::wrap::FactCallConstraint {
-            op: "is-inv-Expr",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                prim_call::<schema_dsl::Expr>(
-                    "ListExpr-ith",
-                    vec![list.handle().into_handle_ty(), i.handle().into_handle_ty()],
-                )
-                .into_handle_ty(),
-            ],
-        };
+        let ith_expr = expr_leaf::<PR>();
+        let helper_entry = schema_dsl::IsInvListExprHelper::query_fields(&body, &list, &i);
+        let ith_expr_matches = ith_expr.handle().eq(&prim_call::<schema_dsl::Expr>(
+            "ListExpr-ith",
+            vec![list.handle().into_handle_ty(), i.handle().into_handle_ty()],
+        ));
+        let ith_is_inv = schema_dsl::IsInvExpr::query_fields(&body, &ith_expr);
 
-        LoopInvariantListHelperRecursePat::new(body, list, i)
-            .assert(helper_entry)
-            .assert(ith_is_inv)
+        LoopInvariantListHelperRecursePat::new(body, list, i, ith_expr, helper_entry, ith_is_inv)
+            .assert(ith_expr_matches)
     }
 
     #[eggplant::pat_vars]
     struct LoopInvariantListHelperFinishPat<PR: PatRecSgl> {
         body: schema_dsl::Expr,
         list: schema_dsl::ListExpr,
+        helper_entry: schema_dsl::IsInvListExprHelper,
     }
 
     fn loop_invariant_list_helper_finish_pat<PR: PatRecSgl>() -> LoopInvariantListHelperFinishPat<PR>
@@ -222,18 +217,10 @@ pub(crate) mod native {
         let body = schema_dsl::Expr::query_leaf();
         let list = schema_dsl::ListExpr::query_leaf();
         let i = BaseVar::<i64, PR>::query_named("list_index");
-        let helper_entry = eggplant::wrap::FactCallConstraint {
-            op: "is-inv-ListExpr-helper",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                list.handle().into_handle_ty(),
-                i.handle().into_handle_ty(),
-            ],
-        };
+        let helper_entry = schema_dsl::IsInvListExprHelper::query_fields(&body, &list, &i);
         let reaches_end = list_expr_length_query(&list, &i);
 
-        LoopInvariantListHelperFinishPat::new(body, list)
-            .assert(helper_entry)
+        LoopInvariantListHelperFinishPat::new(body, list, helper_entry)
             .assert(reaches_end)
     }
 
@@ -294,40 +281,22 @@ pub(crate) mod native {
     fn body_contains_expr<PR: PatRecSgl>(
         body: &schema_dsl::Expr<PR>,
         expr: &schema_dsl::Expr<PR>,
-    ) -> eggplant::wrap::FactCallConstraint {
-        eggplant::wrap::FactCallConstraint {
-            op: "BodyContainsExpr",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                expr.handle().into_handle_ty(),
-            ],
-        }
+    ) -> schema_dsl::BodyContainsExpr<PR> {
+        schema_dsl::BodyContainsExpr::query_fields(body, expr)
     }
 
     fn body_contains_list_expr<PR: PatRecSgl>(
         body: &schema_dsl::Expr<PR>,
         list: &schema_dsl::ListExpr<PR>,
-    ) -> eggplant::wrap::FactCallConstraint {
-        eggplant::wrap::FactCallConstraint {
-            op: "BodyContainsListExpr",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                list.handle().into_handle_ty(),
-            ],
-        }
+    ) -> schema_dsl::BodyContainsListExpr<PR> {
+        schema_dsl::BodyContainsListExpr::query_fields(body, list)
     }
 
     fn is_inv_expr<PR: PatRecSgl>(
         body: &schema_dsl::Expr<PR>,
         expr: &schema_dsl::Expr<PR>,
-    ) -> eggplant::wrap::FactCallConstraint {
-        eggplant::wrap::FactCallConstraint {
-            op: "is-inv-Expr",
-            operands: vec![
-                body.handle().into_handle_ty(),
-                expr.handle().into_handle_ty(),
-            ],
-        }
+    ) -> schema_dsl::IsInvExpr<PR> {
+        schema_dsl::IsInvExpr::query_fields(body, expr)
     }
 
     fn expr_size_query<PR: PatRecSgl>(
@@ -355,6 +324,7 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
     }
 
     fn loop_invariant_generated_const_base_pat<PR: PatRecSgl>(
@@ -366,8 +336,7 @@ pub(crate) mod native {
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_const = expr.handle().eq(&fresh_const_expr::<PR>().handle());
 
-        LoopInvariantGeneratedConstBasePat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedConstBasePat::new(body, expr, loop_expr, body_contains_expr)
             .assert(expr_is_const)
     }
 
@@ -376,6 +345,7 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
     }
 
     fn loop_invariant_generated_empty_base_pat<PR: PatRecSgl>(
@@ -387,8 +357,7 @@ pub(crate) mod native {
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_empty = expr.handle().eq(&fresh_empty_expr::<PR>().handle());
 
-        LoopInvariantGeneratedEmptyBasePat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedEmptyBasePat::new(body, expr, loop_expr, body_contains_expr)
             .assert(expr_is_empty)
     }
 
@@ -397,6 +366,7 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
     }
 
     fn loop_invariant_generated_get_base_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedGetBasePat<PR>
@@ -425,8 +395,7 @@ pub(crate) mod native {
         ));
         let next_constraint = next_i.handle().eq(&(i.handle() + (&1_i64).as_handle()));
 
-        LoopInvariantGeneratedGetBasePat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedGetBasePat::new(body, expr, loop_expr, body_contains_expr)
             .assert(expr_is_get_arg)
             .assert(expr_is_get_next)
             .assert(next_constraint)
@@ -437,6 +406,8 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        tuple_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_get_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedGetPat<PR> {
@@ -456,10 +427,8 @@ pub(crate) mod native {
         ));
         let tuple_is_inv = is_inv_expr(&body, &tuple_expr);
 
-        LoopInvariantGeneratedGetPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedGetPat::new(body, expr, loop_expr, body_contains_expr, tuple_is_inv)
             .assert(expr_is_get)
-            .assert(tuple_is_inv)
     }
 
     #[eggplant::pat_vars]
@@ -467,6 +436,11 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        op_is_pure: schema_dsl::TernaryOpIsPure,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        a_is_inv: schema_dsl::IsInvExpr,
+        b_is_inv: schema_dsl::IsInvExpr,
+        c_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_top_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedTopPat<PR> {
@@ -481,21 +455,22 @@ pub(crate) mod native {
         let top_expr = schema_dsl::Top::query(&op, &a, &b, &c);
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_top = expr.handle().eq(&top_expr.handle());
-        let op_is_pure = eggplant::wrap::FactCallConstraint {
-            op: "TernaryOpIsPure",
-            operands: vec![op.handle().into_handle_ty()],
-        };
+        let op_is_pure = schema_dsl::TernaryOpIsPure::query_fields(&op);
         let a_is_inv = is_inv_expr(&body, &a);
         let b_is_inv = is_inv_expr(&body, &b);
         let c_is_inv = is_inv_expr(&body, &c);
 
-        LoopInvariantGeneratedTopPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_top)
-            .assert(op_is_pure)
-            .assert(a_is_inv)
-            .assert(b_is_inv)
-            .assert(c_is_inv)
+        LoopInvariantGeneratedTopPat::new(
+            body,
+            expr,
+            loop_expr,
+            op_is_pure,
+            body_contains_expr,
+            a_is_inv,
+            b_is_inv,
+            c_is_inv,
+        )
+        .assert(expr_is_top)
     }
 
     #[eggplant::pat_vars]
@@ -503,6 +478,10 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        op_is_pure: schema_dsl::BinaryOpIsPure,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        lhs_is_inv: schema_dsl::IsInvExpr,
+        rhs_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_bop_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedBopPat<PR> {
@@ -517,19 +496,20 @@ pub(crate) mod native {
         let expr_is_bop = expr
             .handle()
             .eq(&schema_dsl::Bop::query(&op, &lhs, &rhs).handle());
-        let op_is_pure = eggplant::wrap::FactCallConstraint {
-            op: "BinaryOpIsPure",
-            operands: vec![op.handle().into_handle_ty()],
-        };
+        let op_is_pure = schema_dsl::BinaryOpIsPure::query_fields(&op);
         let lhs_is_inv = is_inv_expr(&body, &lhs);
         let rhs_is_inv = is_inv_expr(&body, &rhs);
 
-        LoopInvariantGeneratedBopPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_bop)
-            .assert(op_is_pure)
-            .assert(lhs_is_inv)
-            .assert(rhs_is_inv)
+        LoopInvariantGeneratedBopPat::new(
+            body,
+            expr,
+            loop_expr,
+            op_is_pure,
+            body_contains_expr,
+            lhs_is_inv,
+            rhs_is_inv,
+        )
+        .assert(expr_is_bop)
     }
 
     #[eggplant::pat_vars]
@@ -537,6 +517,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        op_is_pure: schema_dsl::UnaryOpIsPure,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        inner_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_uop_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedUopPat<PR> {
@@ -550,17 +533,18 @@ pub(crate) mod native {
         let expr_is_uop = expr
             .handle()
             .eq(&schema_dsl::Uop::query(&op, &inner).handle());
-        let op_is_pure = eggplant::wrap::FactCallConstraint {
-            op: "UnaryOpIsPure",
-            operands: vec![op.handle().into_handle_ty()],
-        };
+        let op_is_pure = schema_dsl::UnaryOpIsPure::query_fields(&op);
         let inner_is_inv = is_inv_expr(&body, &inner);
 
-        LoopInvariantGeneratedUopPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_uop)
-            .assert(op_is_pure)
-            .assert(inner_is_inv)
+        LoopInvariantGeneratedUopPat::new(
+            body,
+            expr,
+            loop_expr,
+            op_is_pure,
+            body_contains_expr,
+            inner_is_inv,
+        )
+        .assert(expr_is_uop)
     }
 
     #[eggplant::pat_vars]
@@ -568,6 +552,7 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
     }
 
     fn loop_invariant_generated_function_pat<PR: PatRecSgl>(
@@ -584,8 +569,7 @@ pub(crate) mod native {
             .handle()
             .eq(&schema_dsl::Function::query(&input_ty, &output_ty, &output).handle());
 
-        LoopInvariantGeneratedFunctionPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedFunctionPat::new(body, expr, loop_expr, body_contains_expr)
             .assert(expr_is_function)
     }
 
@@ -594,6 +578,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        pred_is_inv: schema_dsl::IsInvExpr,
+        input_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_if_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedIfPat<PR> {
@@ -612,11 +599,15 @@ pub(crate) mod native {
         let pred_is_inv = is_inv_expr(&body, &pred);
         let input_is_inv = is_inv_expr(&body, &input);
 
-        LoopInvariantGeneratedIfPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_if)
-            .assert(pred_is_inv)
-            .assert(input_is_inv)
+        LoopInvariantGeneratedIfPat::new(
+            body,
+            expr,
+            loop_expr,
+            body_contains_expr,
+            pred_is_inv,
+            input_is_inv,
+        )
+        .assert(expr_is_if)
     }
 
     #[eggplant::pat_vars]
@@ -624,6 +615,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        expr_is_pure: schema_dsl::ExprIsPure,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        arg_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_call_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedCallPat<PR> {
@@ -635,16 +629,17 @@ pub(crate) mod native {
         let body_contains_expr = body_contains_expr(&body, &expr);
         let expr_is_call = expr.handle().eq(&schema_dsl::Call::query(&arg).handle());
         let arg_is_inv = is_inv_expr(&body, &arg);
-        let expr_is_pure = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsPure",
-            operands: vec![expr.handle().into_handle_ty()],
-        };
+        let expr_is_pure = schema_dsl::ExprIsPure::query_fields(&expr);
 
-        LoopInvariantGeneratedCallPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_call)
-            .assert(arg_is_inv)
-            .assert(expr_is_pure)
+        LoopInvariantGeneratedCallPat::new(
+            body,
+            expr,
+            loop_expr,
+            expr_is_pure,
+            body_contains_expr,
+            arg_is_inv,
+        )
+        .assert(expr_is_call)
     }
 
     #[eggplant::pat_vars]
@@ -652,6 +647,8 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        inner_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_single_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedSinglePat<PR> {
@@ -666,10 +663,8 @@ pub(crate) mod native {
             .eq(&schema_dsl::Single::query(&inner).handle());
         let inner_is_inv = is_inv_expr(&body, &inner);
 
-        LoopInvariantGeneratedSinglePat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
+        LoopInvariantGeneratedSinglePat::new(body, expr, loop_expr, body_contains_expr, inner_is_inv)
             .assert(expr_is_single)
-            .assert(inner_is_inv)
     }
 
     #[eggplant::pat_vars]
@@ -677,6 +672,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        expr_is_pure: schema_dsl::ExprIsPure,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        inner_inputs_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_dowhile_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedDoWhilePat<PR>
@@ -692,16 +690,17 @@ pub(crate) mod native {
             expr.handle()
                 .eq(&schema_dsl::DoWhile::query(&inner_inputs, &pred_and_outputs).handle());
         let inner_inputs_is_inv = is_inv_expr(&body, &inner_inputs);
-        let expr_is_pure = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsPure",
-            operands: vec![expr.handle().into_handle_ty()],
-        };
+        let expr_is_pure = schema_dsl::ExprIsPure::query_fields(&expr);
 
-        LoopInvariantGeneratedDoWhilePat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_dowhile)
-            .assert(inner_inputs_is_inv)
-            .assert(expr_is_pure)
+        LoopInvariantGeneratedDoWhilePat::new(
+            body,
+            expr,
+            loop_expr,
+            expr_is_pure,
+            body_contains_expr,
+            inner_inputs_is_inv,
+        )
+        .assert(expr_is_dowhile)
     }
 
     #[eggplant::pat_vars]
@@ -709,6 +708,9 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        body_contains_expr: schema_dsl::BodyContainsExpr,
+        lhs_is_inv: schema_dsl::IsInvExpr,
+        rhs_is_inv: schema_dsl::IsInvExpr,
     }
 
     fn loop_invariant_generated_concat_pat<PR: PatRecSgl>() -> LoopInvariantGeneratedConcatPat<PR> {
@@ -725,17 +727,23 @@ pub(crate) mod native {
         let lhs_is_inv = is_inv_expr(&body, &lhs);
         let rhs_is_inv = is_inv_expr(&body, &rhs);
 
-        LoopInvariantGeneratedConcatPat::new(body, expr, loop_expr)
-            .assert(body_contains_expr)
-            .assert(expr_is_concat)
-            .assert(lhs_is_inv)
-            .assert(rhs_is_inv)
+        LoopInvariantGeneratedConcatPat::new(
+            body,
+            expr,
+            loop_expr,
+            body_contains_expr,
+            lhs_is_inv,
+            rhs_is_inv,
+        )
+        .assert(expr_is_concat)
     }
 
     #[eggplant::pat_vars]
     struct LoopInvariantBoundaryAnalysisPrepPat<PR: PatRecSgl> {
         inputs: schema_dsl::Expr,
         body: schema_dsl::Expr,
+        expr_is_inv: schema_dsl::IsInvExpr,
+        expr_has_base_type: schema_dsl::HasType,
         size: i64,
         loop_expr: schema_dsl::DoWhile,
     }
@@ -747,22 +755,20 @@ pub(crate) mod native {
         let expr = expr_leaf::<PR>();
         let loop_expr = schema_dsl::DoWhile::query(&inputs, &body);
         let base_inv_ty = base_type_leaf::<PR>();
+        let base_inv_expr_ty = schema_dsl::Base::query(&base_inv_ty);
         let size = BaseVar::<i64, PR>::query_named("inv_size");
         let expr_is_inv = is_inv_expr(&body, &expr);
-        let expr_has_base_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                schema_dsl::Base::query(&base_inv_ty)
-                    .handle()
-                    .into_handle_ty(),
-            ],
-        };
+        let expr_has_base_type = schema_dsl::HasType::query_fields(&expr, &base_inv_expr_ty);
         let expr_size = expr_size_query(&expr, &size);
 
-        LoopInvariantBoundaryAnalysisPrepPat::new(inputs, body, size, loop_expr)
-            .assert(expr_is_inv)
-            .assert(expr_has_base_type)
+        LoopInvariantBoundaryAnalysisPrepPat::new(
+            inputs,
+            body,
+            expr_is_inv,
+            expr_has_base_type,
+            size,
+            loop_expr,
+        )
             .assert(expr_size)
     }
 
@@ -772,6 +778,8 @@ pub(crate) mod native {
         body: schema_dsl::Expr,
         expr: schema_dsl::Expr,
         loop_expr: schema_dsl::DoWhile,
+        expr_is_inv: schema_dsl::IsInvExpr,
+        expr_has_base_type: schema_dsl::HasType,
     }
 
     fn loop_invariant_boundary_analysis_pick_pat<PR: PatRecSgl>(
@@ -781,17 +789,10 @@ pub(crate) mod native {
         let expr = expr_leaf::<PR>();
         let loop_expr = schema_dsl::DoWhile::query(&inputs, &body);
         let base_inv_ty = base_type_leaf::<PR>();
+        let base_inv_expr_ty = schema_dsl::Base::query(&base_inv_ty);
         let size = BaseVar::<i64, PR>::query_named("inv_size");
         let expr_is_inv = is_inv_expr(&body, &expr);
-        let expr_has_base_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                expr.handle().into_handle_ty(),
-                schema_dsl::Base::query(&base_inv_ty)
-                    .handle()
-                    .into_handle_ty(),
-            ],
-        };
+        let expr_has_base_type = schema_dsl::HasType::query_fields(&expr, &base_inv_expr_ty);
         let expr_size = expr_size_query(&expr, &size);
         let matches_best_size = size.handle().eq(&prim_call::<i64>(
             "to-hoist-size",
@@ -801,9 +802,14 @@ pub(crate) mod native {
             ],
         ));
 
-        LoopInvariantBoundaryAnalysisPickPat::new(inputs, body, expr, loop_expr)
-            .assert(expr_is_inv)
-            .assert(expr_has_base_type)
+        LoopInvariantBoundaryAnalysisPickPat::new(
+            inputs,
+            body,
+            expr,
+            loop_expr,
+            expr_is_inv,
+            expr_has_base_type,
+        )
             .assert(expr_size)
             .assert(matches_best_size)
     }
@@ -817,6 +823,9 @@ pub(crate) mod native {
         loop_ctx: schema_dsl::Assumption,
         tylist: schema_dsl::TypeList,
         base_inv_ty: schema_dsl::BaseType,
+        loop_has_context: schema_dsl::ContextOf,
+        input_has_tuple_type: schema_dsl::HasType,
+        invariant_has_base_type: schema_dsl::HasType,
     }
 
     fn loop_invariant_motion_pat<PR: PatRecSgl>() -> LoopInvMotionPat<PR> {
@@ -827,6 +836,11 @@ pub(crate) mod native {
         let loop_ctx = assumption_leaf::<PR>();
         let tylist = type_list_leaf::<PR>();
         let base_inv_ty = base_type_leaf::<PR>();
+        let input_tuple_ty = schema_dsl::TupleT::query(&tylist);
+        let invariant_base_ty = schema_dsl::Base::query(&base_inv_ty);
+        let loop_has_context = schema_dsl::ContextOf::query_fields(&loop_expr, &loop_ctx);
+        let input_has_tuple_type = schema_dsl::HasType::query_fields(&in_expr, &input_tuple_ty);
+        let invariant_has_base_type = schema_dsl::HasType::query_fields(&inv, &invariant_base_ty);
         let inv_size = BaseVar::<i64, PR>::query_named("inv_size");
         let hoisted_inv = inv.handle().eq(&prim_call::<schema_dsl::Expr>(
             "to-hoist",
@@ -837,29 +851,6 @@ pub(crate) mod native {
         ));
         let inv_size_fact = expr_size_query(&inv, &inv_size);
         let inv_is_large_enough = inv_size.handle().gt(&1_i64);
-        let loop_has_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                loop_expr.handle().into_handle_ty(),
-                loop_ctx.handle().into_handle_ty(),
-            ],
-        };
-        let input_has_tuple_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                in_expr.handle().into_handle_ty(),
-                schema_dsl::TupleT::query(&tylist).handle().into_handle_ty(),
-            ],
-        };
-        let invariant_has_base_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                inv.handle().into_handle_ty(),
-                schema_dsl::Base::query(&base_inv_ty)
-                    .handle()
-                    .into_handle_ty(),
-            ],
-        };
         let len = BaseVar::<i64, PR>::query_named("len");
         let iter_guess = BaseVar::<i64, PR>::query_named("iter_guess");
         let input_tuple_len = len.handle().eq(&prim_call::<i64>(
@@ -874,13 +865,21 @@ pub(crate) mod native {
             ],
         ));
 
-        LoopInvMotionPat::new(loop_expr, in_expr, body, inv, loop_ctx, tylist, base_inv_ty)
+        LoopInvMotionPat::new(
+            loop_expr,
+            in_expr,
+            body,
+            inv,
+            loop_ctx,
+            tylist,
+            base_inv_ty,
+            loop_has_context,
+            input_has_tuple_type,
+            invariant_has_base_type,
+        )
             .assert(hoisted_inv)
             .assert(inv_size_fact)
             .assert(inv_is_large_enough)
-            .assert(loop_has_context)
-            .assert(input_has_tuple_type)
-            .assert(invariant_has_base_type)
             .assert(input_tuple_len)
             .assert(iter_guess)
     }
@@ -896,15 +895,7 @@ pub(crate) mod native {
             always_run,
             loop_invariant_list_helper_seed_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
-                ctx.insert_func_tbl(
-                    "is-inv-ListExpr-helper",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.list.to_value(&ctx.ctx).val,
-                        zero,
-                    ],
-                );
+                ctx.insert_is_inv_list_expr_helper(pat.body, pat.list, 0_i64);
             },
         );
 
@@ -913,15 +904,7 @@ pub(crate) mod native {
             always_run,
             loop_invariant_list_helper_recurse_pat,
             |ctx, pat| {
-                let next_i = ctx._intern_base::<i64, i64>(ctx.devalue(pat.i) + 1);
-                ctx.insert_func_tbl(
-                    "is-inv-ListExpr-helper",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.list.to_value(&ctx.ctx).val,
-                        next_i,
-                    ],
-                );
+                ctx.insert_is_inv_list_expr_helper(pat.body, pat.list, ctx.devalue(pat.i) + 1);
             },
         );
 
@@ -930,13 +913,7 @@ pub(crate) mod native {
             always_run,
             loop_invariant_list_helper_finish_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-ListExpr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.list.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_list_expr(pat.body, pat.list);
             },
         );
 
@@ -945,13 +922,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_const_base_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -960,13 +931,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_empty_base_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -975,13 +940,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_get_base_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -990,13 +949,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_get_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1005,13 +958,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_top_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1020,13 +967,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_bop_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1035,13 +976,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_uop_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1050,13 +985,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_function_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1065,13 +994,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_if_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1080,13 +1003,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_call_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1095,13 +1012,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_single_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1110,13 +1021,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_dowhile_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1125,13 +1030,7 @@ pub(crate) mod native {
             generated_ruleset,
             loop_invariant_generated_concat_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "is-inv-Expr",
-                    &[
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ctx.insert_is_inv_expr(pat.body, pat.expr);
             },
         );
 
@@ -1144,8 +1043,8 @@ pub(crate) mod native {
                 ctx.insert_func_tbl(
                     "to-hoist-size",
                     &[
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.body.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.body.to_value(&ctx).val,
                         size,
                     ],
                 );
@@ -1160,9 +1059,9 @@ pub(crate) mod native {
                 ctx.insert_func_tbl(
                     "to-hoist",
                     &[
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.body.to_value(&ctx.ctx).val,
-                        pat.expr.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.body.to_value(&ctx).val,
+                        pat.expr.to_value(&ctx).val,
                     ],
                 );
             },
@@ -1179,145 +1078,79 @@ pub(crate) mod native {
             loop_invariant_motion_pat,
             |ctx, pat| {
                 let zero = ctx._intern_base::<i64, i64>(0);
-                let len = ctx.lookup_expect("tuple-length", &[pat.in_expr.to_value(&ctx.ctx).val]);
+                let len_val = ctx.lookup_expect("tuple-length", &[pat.in_expr.to_value(&ctx).val]);
+                let len = ctx.devalue(eggplant::wrap::Value::<i64>::new(len_val));
                 let iter_guess = ctx.lookup_expect(
                     "LoopNumItersGuess",
-                    &[
-                        pat.in_expr.to_value(&ctx.ctx).val,
-                        pat.body.to_value(&ctx.ctx).val,
-                    ],
+                    &[pat.in_expr.to_value(&ctx).val, pat.body.to_value(&ctx).val],
                 );
 
-                let hoisted_inv = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let hoisted_inv = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        pat.loop_ctx.to_value(&ctx.ctx).val,
-                        pat.in_expr.to_value(&ctx.ctx).val,
-                        pat.inv.to_value(&ctx.ctx).val,
+                        pat.loop_ctx.to_value(&ctx).val,
+                        pat.in_expr.to_value(&ctx).val,
+                        pat.inv.to_value(&ctx).val,
                     ],
-                );
-                let new_input = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Concat",
-                    &[
-                        pat.in_expr.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Single",
-                            &[hoisted_inv.to_value(&ctx.ctx).val],
-                        )
-                        .to_value(&ctx.ctx)
-                        .val,
-                    ],
-                );
+                ));
+                let new_input = ctx.insert_concat(pat.in_expr, ctx.insert_single(hoisted_inv));
 
-                let tnil = insert_call::<schema_dsl::TypeList>(&ctx.ctx, "TNil", &[]);
-                let appended_tail = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
-                    "TCons",
-                    &[pat.base_inv_ty.to_value(&ctx.ctx).val, tnil.0.val],
-                );
-                let new_tylist = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
+                let tnil = ctx.insert_t_nil();
+                let appended_tail = ctx.insert_t_cons(pat.base_inv_ty, tnil);
+                let new_tylist = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert(
                     "TLConcat",
                     &[
-                        pat.tylist.to_value(&ctx.ctx).val,
-                        appended_tail.to_value(&ctx.ctx).val,
+                        pat.tylist.to_value(&ctx).val,
+                        appended_tail.to_value(&ctx).val,
                     ],
-                );
-                let new_input_type =
-                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_tylist.0.val]);
+                ));
+                let new_input_type = ctx.insert_tuple_t(new_tylist);
 
-                let assum = insert_call::<schema_dsl::Assumption>(&ctx.ctx, "TmpCtx", &[]);
-                let new_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Arg",
-                    &[
-                        new_input_type.to_value(&ctx.ctx).val,
-                        assum.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_out_branch = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[new_arg.to_value(&ctx.ctx).val, len],
-                );
-                let old_arg_prefix = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let assum =
+                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("TmpCtx", &[]));
+                let new_arg = ctx.insert_arg(new_input_type, assum);
+                let new_out_branch = ctx.insert_get(new_arg, len);
+                let old_arg_prefix = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "SubTuple",
-                    &[new_arg.to_value(&ctx.ctx).val, zero, len],
-                );
-                let substed_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[new_arg.to_value(&ctx).val, zero, len_val],
+                ));
+                let substed_body = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        assum.to_value(&ctx.ctx).val,
-                        old_arg_prefix.to_value(&ctx.ctx).val,
-                        pat.body.to_value(&ctx.ctx).val,
+                        assum.to_value(&ctx).val,
+                        old_arg_prefix.to_value(&ctx).val,
+                        pat.body.to_value(&ctx).val,
                     ],
-                );
-                let inv_in_new_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let inv_in_new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        assum.to_value(&ctx.ctx).val,
-                        old_arg_prefix.to_value(&ctx.ctx).val,
-                        pat.inv.to_value(&ctx.ctx).val,
+                        assum.to_value(&ctx).val,
+                        old_arg_prefix.to_value(&ctx).val,
+                        pat.inv.to_value(&ctx).val,
                     ],
-                );
-                let new_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Concat",
-                    &[
-                        substed_body.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Single",
-                            &[new_out_branch.to_value(&ctx.ctx).val],
-                        )
-                        .to_value(&ctx.ctx)
-                        .val,
-                    ],
-                );
-                let new_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "DoWhile",
-                    &[
-                        new_input.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let loop_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "InLoop",
-                    &[
-                        new_input.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
-                    ],
-                );
+                ));
+                let new_body = ctx.insert_concat(substed_body, ctx.insert_single(new_out_branch));
+                let new_loop = ctx.insert_do_while(new_input, new_body);
+                let loop_ctx = ctx.insert_in_loop(new_input, new_body);
                 ctx.union(assum, loop_ctx);
                 ctx.union(inv_in_new_loop, new_out_branch);
 
-                let wrapper = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let wrapper = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "SubTuple",
-                    &[new_loop.to_value(&ctx.ctx).val, zero, len],
-                );
+                    &[new_loop.to_value(&ctx).val, zero, len_val],
+                ));
                 ctx.union(pat.loop_expr, wrapper);
                 ctx.subsume(
                     "DoWhile",
-                    &[
-                        pat.in_expr.to_value(&ctx.ctx).val,
-                        pat.body.to_value(&ctx.ctx).val,
-                    ],
+                    &[pat.in_expr.to_value(&ctx).val, pat.body.to_value(&ctx).val],
                 );
                 ctx.remove("TmpCtx", &[]);
                 ctx.insert_func_tbl(
                     "LoopNumItersGuess",
                     &[
-                        new_input.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
+                        new_input.to_value(&ctx).val,
+                        new_body.to_value(&ctx).val,
                         iter_guess,
                     ],
                 );
@@ -1666,7 +1499,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_inv {inv})\n(let __rlcr_single_inv {single_inv})\n(let __rlcr_concat_inv {concat_inv})\n(let __rlcr_empty_inv {empty_inv})"
         );
         let schedule = format!(
-            "{}\n(check (is-inv-Expr __rlcr_body __rlcr_inv))\n(check (is-inv-Expr __rlcr_body __rlcr_single_inv))\n(check (is-inv-Expr __rlcr_body __rlcr_concat_inv))\n(check (is-inv-Expr __rlcr_body __rlcr_empty_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_inv))\n",
+            "{}\n(check (IsInvExpr __rlcr_body __rlcr_inv))\n(check (IsInvExpr __rlcr_body __rlcr_single_inv))\n(check (IsInvExpr __rlcr_body __rlcr_concat_inv))\n(check (IsInvExpr __rlcr_body __rlcr_empty_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_inv))\n",
             helper_schedule()
         );
 
@@ -1684,7 +1517,7 @@ mod native_tests {
         let _guard = test_lock::lock();
         let (program, loop_expr, body, call_inv, call_arg) = call_witness_program_terms();
         let schedule = format!(
-            "{}\n(check (BodyContainsExpr __rlcr_body __rlcr_call_inv))\n(check (ExprIsPure __rlcr_call_inv))\n(check (is-inv-Expr __rlcr_body __rlcr_call_arg))\n(check (is-inv-Expr __rlcr_body __rlcr_call_inv))\n",
+            "{}\n(check (BodyContainsExpr __rlcr_body __rlcr_call_inv))\n(check (ExprIsPure __rlcr_call_inv))\n(check (IsInvExpr __rlcr_body __rlcr_call_arg))\n(check (IsInvExpr __rlcr_body __rlcr_call_inv))\n",
             helper_schedule()
         );
         let (program_initialization, schedule) = build_feature_program_parts(&program, &schedule);
@@ -1709,7 +1542,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_top_inv {top_inv})"
         );
         let schedule = format!(
-            "{}\n(check (is-inv-Expr __rlcr_body __rlcr_top_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_top_inv))\n",
+            "{}\n(check (IsInvExpr __rlcr_body __rlcr_top_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_top_inv))\n",
             helper_schedule()
         );
 
@@ -1730,7 +1563,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_if_inv {if_inv})"
         );
         let schedule = format!(
-            "{}\n(check (is-inv-Expr __rlcr_body __rlcr_if_inv))\n",
+            "{}\n(check (IsInvExpr __rlcr_body __rlcr_if_inv))\n",
             helper_schedule()
         );
 
@@ -1751,7 +1584,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_dowhile_inv {dowhile_inv})"
         );
         let schedule = format!(
-            "{}\n(check (ExprIsPure __rlcr_dowhile_inv))\n(check (is-inv-Expr __rlcr_body __rlcr_dowhile_inv))\n",
+            "{}\n(check (ExprIsPure __rlcr_dowhile_inv))\n(check (IsInvExpr __rlcr_body __rlcr_dowhile_inv))\n",
             helper_schedule()
         );
 

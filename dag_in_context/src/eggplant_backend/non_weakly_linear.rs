@@ -81,12 +81,9 @@ const NON_WEAKLY_LINEAR: &str = r#"(ruleset non-weakly-linear)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{
-        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
-    };
+    use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct IfConstPat<PR: PatRecSgl> {
@@ -174,6 +171,8 @@ pub(crate) mod native {
         outputs: schema_dsl::Expr,
         ctx: schema_dsl::Assumption,
         inputs_ty: schema_dsl::Type,
+        loop_context: schema_dsl::ContextOf,
+        inputs_have_type: schema_dsl::HasType,
     }
 
     fn loop_peel_pat<PR: PatRecSgl>() -> LoopPeelPat<PR> {
@@ -182,22 +181,18 @@ pub(crate) mod native {
         let lhs = schema_dsl::DoWhile::query(&inputs, &outputs);
         let ctx = schema_dsl::Assumption::query_leaf();
         let inputs_ty = schema_dsl::Type::query_leaf();
+        let loop_context = schema_dsl::ContextOf::query_fields(&lhs, &ctx);
+        let inputs_have_type = schema_dsl::HasType::query_fields(&inputs, &inputs_ty);
 
-        let loop_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![lhs.handle().into_handle_ty(), ctx.handle().into_handle_ty()],
-        };
-        let inputs_have_type = eggplant::wrap::FactCallConstraint {
-            op: "HasType",
-            operands: vec![
-                inputs.handle().into_handle_ty(),
-                inputs_ty.handle().into_handle_ty(),
-            ],
-        };
-
-        LoopPeelPat::new(lhs, inputs, outputs, ctx, inputs_ty)
-            .assert(loop_context)
-            .assert(inputs_have_type)
+        LoopPeelPat::new(
+            lhs,
+            inputs,
+            outputs,
+            ctx,
+            inputs_ty,
+            loop_context,
+            inputs_have_type,
+        )
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
@@ -206,17 +201,18 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "non_weakly_linear_if_true",
             ruleset,
-            || if_const_pat(true),
+            || {
+                if_const_pat(true)
+            },
             |ctx, pat| {
-                let rewritten = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        pat.ctx.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.branch.to_value(&ctx.ctx).val,
+                        pat.ctx.to_value(&ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.branch.to_value(&ctx).val,
                     ],
-                );
+                ));
                 ctx.union(pat.if_e, rewritten);
             },
         );
@@ -224,17 +220,18 @@ pub(crate) mod native {
         PeepholeTx::add_rule(
             "non_weakly_linear_if_false",
             ruleset,
-            || if_const_pat(false),
+            || {
+                if_const_pat(false)
+            },
             |ctx, pat| {
-                let rewritten = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        pat.ctx.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.branch.to_value(&ctx.ctx).val,
+                        pat.ctx.to_value(&ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.branch.to_value(&ctx).val,
                     ],
-                );
+                ));
                 ctx.union(pat.if_e, rewritten);
             },
         );
@@ -253,14 +250,10 @@ pub(crate) mod native {
             ruleset,
             if_passthrough_pat,
             |ctx, pat| {
-                let passthrough = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Get",
-                    &[
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.then_arg_out.index.val,
-                    ],
-                );
+                    &[pat.inputs.to_value(&ctx).val, pat.then_arg_out.index.val],
+                ));
                 ctx.union(pat.lhs, passthrough);
             },
         );
@@ -273,8 +266,8 @@ pub(crate) mod native {
                 let Some(old_cost_value) = ctx.lookup(
                     "LoopNumItersGuess",
                     &[
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.outputs.to_value(&ctx.ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.outputs.to_value(&ctx).val,
                     ],
                 ) else {
                     return;
@@ -287,116 +280,103 @@ pub(crate) mod native {
                 let zero = ctx._intern_base::<i64, i64>(0);
                 let one = ctx._intern_base::<i64, i64>(1);
                 let outputs_len_value =
-                    ctx.lookup_expect("tuple-length", &[pat.outputs.to_value(&ctx.ctx).val]);
+                    ctx.lookup_expect("tuple-length", &[pat.outputs.to_value(&ctx).val]);
                 let outputs_len: i64 = ctx._devalue_base(outputs_len_value);
                 let outputs_body_len = ctx._intern_base::<i64, i64>(outputs_len - 1);
 
-                let executed_once = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let executed_once = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        pat.ctx.to_value(&ctx.ctx).val,
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        pat.outputs.to_value(&ctx.ctx).val,
+                        pat.ctx.to_value(&ctx).val,
+                        pat.inputs.to_value(&ctx).val,
+                        pat.outputs.to_value(&ctx).val,
                     ],
+                ));
+                let executed_once_pred = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("Get", &[executed_once.to_value(&ctx).val, zero]),
                 );
-                let executed_once_pred = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[executed_once.to_value(&ctx.ctx).val, zero],
-                );
-                let executed_once_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "SubTuple",
-                    &[executed_once.to_value(&ctx.ctx).val, one, outputs_body_len],
-                );
-                let then_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                let executed_once_body =
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                        "SubTuple",
+                        &[executed_once.to_value(&ctx).val, one, outputs_body_len],
+                    ));
+                let then_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InIf",
                     &[
-                        true.to_value(&ctx.ctx).val,
-                        executed_once_pred.to_value(&ctx.ctx).val,
-                        executed_once_body.to_value(&ctx.ctx).val,
+                        true.to_value(&ctx).val,
+                        executed_once_pred.to_value(&ctx).val,
+                        executed_once_body.to_value(&ctx).val,
                     ],
-                );
-                let else_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                ));
+                let else_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InIf",
                     &[
-                        false.to_value(&ctx.ctx).val,
-                        executed_once_pred.to_value(&ctx.ctx).val,
-                        executed_once_body.to_value(&ctx.ctx).val,
+                        false.to_value(&ctx).val,
+                        executed_once_pred.to_value(&ctx).val,
+                        executed_once_body.to_value(&ctx).val,
                     ],
-                );
-                let new_loop_input = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let new_loop_input = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Arg",
                     &[
-                        pat.inputs_ty.to_value(&ctx.ctx).val,
-                        then_ctx.to_value(&ctx.ctx).val,
+                        pat.inputs_ty.to_value(&ctx).val,
+                        then_ctx.to_value(&ctx).val,
                     ],
+                ));
+                let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("TmpCtx", &[]),
                 );
-                let tmp_ctx = insert_call::<schema_dsl::Assumption>(&ctx.ctx, "TmpCtx", &[]);
-                let tmp_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Arg",
-                    &[
-                        pat.inputs_ty.to_value(&ctx.ctx).val,
-                        tmp_ctx.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_loop_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                    &[pat.inputs_ty.to_value(&ctx).val, tmp_ctx.to_value(&ctx).val],
+                ));
+                let new_loop_body = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
                     &[
-                        tmp_ctx.to_value(&ctx.ctx).val,
-                        tmp_arg.to_value(&ctx.ctx).val,
-                        pat.outputs.to_value(&ctx.ctx).val,
+                        tmp_ctx.to_value(&ctx).val,
+                        tmp_arg.to_value(&ctx).val,
+                        pat.outputs.to_value(&ctx).val,
                     ],
-                );
-                let in_loop = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
+                ));
+                let in_loop = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InLoop",
                     &[
-                        new_loop_input.to_value(&ctx.ctx).val,
-                        new_loop_body.to_value(&ctx.ctx).val,
+                        new_loop_input.to_value(&ctx).val,
+                        new_loop_body.to_value(&ctx).val,
                     ],
-                );
+                ));
                 ctx.union(tmp_ctx, in_loop);
 
-                let else_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let else_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Arg",
                     &[
-                        pat.inputs_ty.to_value(&ctx.ctx).val,
-                        else_ctx.to_value(&ctx.ctx).val,
+                        pat.inputs_ty.to_value(&ctx).val,
+                        else_ctx.to_value(&ctx).val,
                     ],
-                );
-                let peeled_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let peeled_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DoWhile",
                     &[
-                        new_loop_input.to_value(&ctx.ctx).val,
-                        new_loop_body.to_value(&ctx.ctx).val,
+                        new_loop_input.to_value(&ctx).val,
+                        new_loop_body.to_value(&ctx).val,
                     ],
-                );
-                let peeled_if = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let peeled_if = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "If",
                     &[
-                        executed_once_pred.to_value(&ctx.ctx).val,
-                        executed_once_body.to_value(&ctx.ctx).val,
-                        peeled_loop.to_value(&ctx.ctx).val,
-                        else_arg.to_value(&ctx.ctx).val,
+                        executed_once_pred.to_value(&ctx).val,
+                        executed_once_body.to_value(&ctx).val,
+                        peeled_loop.to_value(&ctx).val,
+                        else_arg.to_value(&ctx).val,
                     ],
-                );
+                ));
 
                 ctx.union(pat.lhs, peeled_if);
                 ctx.insert_func_tbl(
                     "LoopNumItersGuess",
                     &[
-                        new_loop_input.to_value(&ctx.ctx).val,
-                        new_loop_body.to_value(&ctx.ctx).val,
+                        new_loop_input.to_value(&ctx).val,
+                        new_loop_body.to_value(&ctx).val,
                         ctx._intern_base::<i64, i64>(old_cost - 1),
                     ],
                 );

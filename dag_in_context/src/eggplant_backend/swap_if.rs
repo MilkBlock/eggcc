@@ -38,10 +38,10 @@ const SWAP_IF: &str = r#"(ruleset swap-if)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
-    use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{AsHandle, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use schema_dsl::{ExprPRRuleCtx, UnaryOpPRRuleCtx};
 
     #[eggplant::pat_vars]
     struct SwapIfPat<PR: PatRecSgl> {
@@ -130,97 +130,21 @@ pub(crate) mod native {
         let ruleset = PeepholeTx::new_ruleset("swap-if");
 
         PeepholeTx::add_rule("swap_if_not", ruleset, swap_if_pat, |ctx, pat| {
-            let not_op = insert_call::<schema_dsl::UnaryOp>(&ctx.ctx, "Not", &[]);
-            let inverted_pred = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Uop",
-                &[not_op.0.val, pat.pred.to_value(&ctx.ctx).val],
-            );
-            let swapped_if = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "If",
-                &[
-                    inverted_pred.to_value(&ctx.ctx).val,
-                    pat.inputs.to_value(&ctx.ctx).val,
-                    pat.else_.to_value(&ctx.ctx).val,
-                    pat.then_.to_value(&ctx.ctx).val,
-                ],
-            );
+            let not_op = ctx.insert_not();
+            let inverted_pred = ctx.insert_uop(not_op, pat.pred);
+            let swapped_if = ctx.insert_if(inverted_pred, pat.inputs, pat.else_, pat.then_);
 
             ctx.union(pat.if_expr, swapped_if);
         });
 
         PeepholeTx::add_rule("swap_if_tuple", ruleset, swap_if_tuple_pat, |ctx, pat| {
-            let swapped_then = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Concat",
-                &[
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.then1.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.then0.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                ],
-            );
-            let swapped_else = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Concat",
-                &[
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.else1.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.else0.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                ],
-            );
-            let swapped_if = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "If",
-                &[
-                    pat.pred.to_value(&ctx.ctx).val,
-                    pat.inputs.to_value(&ctx.ctx).val,
-                    swapped_then.to_value(&ctx.ctx).val,
-                    swapped_else.to_value(&ctx.ctx).val,
-                ],
-            );
-            let swapped_outputs = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Concat",
-                &[
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.lhs1.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                    insert_call::<schema_dsl::Expr>(
-                        &ctx.ctx,
-                        "Single",
-                        &[pat.lhs0.to_value(&ctx.ctx).val],
-                    )
-                    .to_value(&ctx.ctx)
-                    .val,
-                ],
-            );
+            let swapped_then =
+                ctx.insert_concat(ctx.insert_single(pat.then1), ctx.insert_single(pat.then0));
+            let swapped_else =
+                ctx.insert_concat(ctx.insert_single(pat.else1), ctx.insert_single(pat.else0));
+            let swapped_if = ctx.insert_if(pat.pred, pat.inputs, swapped_then, swapped_else);
+            let swapped_outputs =
+                ctx.insert_concat(ctx.insert_single(pat.lhs1), ctx.insert_single(pat.lhs0));
 
             ctx.union(swapped_outputs, swapped_if);
         });

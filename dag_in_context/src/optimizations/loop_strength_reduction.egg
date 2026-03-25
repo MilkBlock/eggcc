@@ -17,7 +17,7 @@
 ; Columns: body; value of invariant in inputs; value of invariant in outputs
 ;; Get the input and output value of an invariant, or constant int, within the loop
 ;;             loop in   out
-(relation lsr-inv (Expr Expr Expr))
+(relation LsrInv (Expr Expr Expr))
 
 ; TODO: there may be a bug with finding the invariant, or it just may not be extracted.
 ; Can make this work on loop_with_mul_by_inv and a rust test later.
@@ -32,7 +32,7 @@
     (= constant (Const c out-type loop-output-ctx))
     (HasArgType inputs in-type)
     )
-    ((lsr-inv loop (Const c in-type loop-input-ctx) constant)) :ruleset always-run)
+    ((LsrInv loop (Const c in-type loop-input-ctx) constant)) :ruleset always-run)
 
 (rule 
     (
@@ -41,12 +41,12 @@
         (ContextOf pred-and-outputs loop-ctx)
 
         ; Find loop variable (argument that gets incremented with an invariant)
-        (lsr-inv old-loop loop-incr-in loop-incr-out)
+        (LsrInv old-loop loop-incr-in loop-incr-out)
         ; Since the first el of pred-and-outputs is the pred, we need to offset i
         (= (Get pred-and-outputs (+ i 1)) (Bop (Add) (Get (Arg arg-type assm) i) loop-incr-out))
 
         ; Find invariant where input is same as output, or constant
-        (lsr-inv old-loop c-in c-out)
+        (LsrInv old-loop c-in c-out)
 
         ; Find multiplication of loop variable and invariant
         (= old-mul (Bop (Mul) c-out (Get (Arg arg-type assm) i)))

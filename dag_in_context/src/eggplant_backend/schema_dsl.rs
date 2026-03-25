@@ -228,6 +228,238 @@ pub(crate) enum Assumption {
     },
 }
 
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for Type<T>
+where
+    Type<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for BaseType<T>
+where
+    BaseType<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for Expr<T>
+where
+    Expr<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for ListExpr<T>
+where
+    ListExpr<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for TypeList<T>
+where
+    TypeList<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for Term<T>
+where
+    Term<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for Assumption<T>
+where
+    Assumption<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for TernaryOp<T>
+where
+    TernaryOp<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for BinaryOp<T>
+where
+    BinaryOp<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+impl<T: eggplant::wrap::NodeDropperSgl> std::fmt::Debug for UnaryOp<T>
+where
+    UnaryOp<T>: EgglogNode,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.cur_sym())
+    }
+}
+
+#[eggplant::relation]
+pub(crate) struct ContextOf {
+    expr: Expr,
+    ctx: Assumption,
+}
+
+#[eggplant::relation]
+pub(crate) struct HasArgType {
+    expr: Expr,
+    ty: Type,
+}
+
+#[eggplant::relation]
+pub(crate) struct HasType {
+    expr: Expr,
+    ty: Type,
+}
+
+#[eggplant::relation]
+pub(crate) struct ExprIsPure {
+    expr: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct ExprIsResolved {
+    expr: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct PureBaseType {
+    ty: BaseType,
+}
+
+#[eggplant::relation]
+pub(crate) struct PureType {
+    ty: Type,
+}
+
+#[eggplant::relation]
+pub(crate) struct PureTypeList {
+    tylist: TypeList,
+}
+
+#[eggplant::relation]
+pub(crate) struct InvCodeMotionCandidate {
+    e1: Expr,
+    e2: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct ExtractedExprCache {
+    term: Term,
+    expr: Expr,
+    ctx: Assumption,
+}
+
+#[eggplant::relation]
+pub(crate) struct IVTNewInputsAnalysisDemand {
+    expr: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct TernaryOpIsPure {
+    op: TernaryOp,
+}
+
+#[eggplant::relation]
+pub(crate) struct BinaryOpIsPure {
+    op: BinaryOp,
+}
+
+#[eggplant::relation]
+pub(crate) struct UnaryOpIsPure {
+    op: UnaryOp,
+}
+
+#[eggplant::relation]
+pub(crate) struct NoAlias {
+    lhs: Expr,
+    rhs: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct IsIsEven {
+    expr: Expr,
+    input: Expr,
+}
+
+#[allow(non_camel_case_types)]
+#[eggplant::relation]
+pub(crate) struct NTZIterations {
+    loop_expr: Expr,
+    input: Expr,
+    index: i64,
+}
+
+#[eggplant::relation]
+pub(crate) struct BodyContainsExpr {
+    body: Expr,
+    expr: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct BodyContainsListExpr {
+    body: Expr,
+    list: ListExpr,
+}
+
+#[eggplant::relation]
+pub(crate) struct IsInvExpr {
+    body: Expr,
+    expr: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct IsInvListExpr {
+    body: Expr,
+    list: ListExpr,
+}
+
+#[eggplant::relation]
+pub(crate) struct IsInvListExprHelper {
+    body: Expr,
+    list: ListExpr,
+    index: i64,
+}
+
+#[eggplant::relation]
+pub(crate) struct LsrInv {
+    loop_expr: Expr,
+    input: Expr,
+    output: Expr,
+}
+
+#[eggplant::relation]
+pub(crate) struct ToSubsumeIf {
+    pred: Expr,
+    inputs: Expr,
+    then_branch: Expr,
+    else_branch: Expr,
+}
+
 #[eggplant::dsl]
 pub(crate) enum Constant {
     #[eggplant::typst("{value}")]

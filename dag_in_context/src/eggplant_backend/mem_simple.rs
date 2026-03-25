@@ -163,7 +163,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use crate::eggplant_backend::schema_dsl::{BinaryOpRuleCtx, ExprRuleCtx, TernaryOpRuleCtx};
-    use eggplant::prelude::{IntoHandleTy, PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct CommuteWriteLoadPat<PR: PatRecSgl> {
@@ -173,6 +173,7 @@ pub(crate) mod native {
         state: schema_dsl::Expr,
         write: schema_dsl::Top,
         load: schema_dsl::Bop,
+        no_alias: schema_dsl::NoAlias,
     }
 
     fn commute_write_load_pat<PR: PatRecSgl>() -> CommuteWriteLoadPat<PR> {
@@ -183,16 +184,9 @@ pub(crate) mod native {
         let write =
             schema_dsl::Top::query(&schema_dsl::Write::query(), &write_addr, &write_val, &state);
         let load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &load_addr, &write);
-        let no_alias = eggplant::wrap::FactCallConstraint {
-            op: "NoAlias",
-            operands: vec![
-                write_addr.handle().into_handle_ty(),
-                load_addr.handle().into_handle_ty(),
-            ],
-        };
+        let no_alias = schema_dsl::NoAlias::query_fields(&write_addr, &load_addr);
 
-        CommuteWriteLoadPat::new(write_addr, load_addr, write_val, state, write, load)
-            .assert(no_alias)
+        CommuteWriteLoadPat::new(write_addr, load_addr, write_val, state, write, load, no_alias)
     }
 
     #[eggplant::pat_vars]
@@ -276,17 +270,17 @@ pub(crate) mod native {
             |ctx, pat| {
                 let new_load = ctx
                     .ctx
-                    .insert_bop(ctx.ctx.insert_load(), pat.load_addr, pat.state);
-                let new_load_state = ctx.ctx.insert_get(new_load, 1_i64);
-                let new_write = ctx.ctx.insert_top(
-                    ctx.ctx.insert_write(),
+                    .insert_bop(ctx.insert_load(), pat.load_addr, pat.state);
+                let new_load_state = ctx.insert_get(new_load, 1_i64);
+                let new_write = ctx.insert_top(
+                    ctx.insert_write(),
                     pat.write_addr,
                     pat.write_val,
                     new_load_state,
                 );
-                let load_state = ctx.ctx.insert_get(pat.load, 1_i64);
-                let load_value = ctx.ctx.insert_get(pat.load, 0_i64);
-                let new_load_value = ctx.ctx.insert_get(new_load, 0_i64);
+                let load_state = ctx.insert_get(pat.load, 1_i64);
+                let load_value = ctx.insert_get(pat.load, 0_i64);
+                let new_load_value = ctx.insert_get(new_load, 0_i64);
 
                 ctx.union(load_state, new_write);
                 ctx.union(load_value, new_load_value);
@@ -298,10 +292,10 @@ pub(crate) mod native {
             ruleset,
             duplicate_load_pat,
             |ctx, pat| {
-                let first_value = ctx.ctx.insert_get(pat.first_load, 0_i64);
-                let second_value = ctx.ctx.insert_get(pat.second_load, 0_i64);
-                let first_state = ctx.ctx.insert_get(pat.first_load, 1_i64);
-                let second_state = ctx.ctx.insert_get(pat.second_load, 1_i64);
+                let first_value = ctx.insert_get(pat.first_load, 0_i64);
+                let second_value = ctx.insert_get(pat.second_load, 0_i64);
+                let first_state = ctx.insert_get(pat.first_load, 1_i64);
+                let second_state = ctx.insert_get(pat.second_load, 1_i64);
 
                 ctx.union(first_value, second_value);
                 ctx.union(first_state, second_state);
@@ -313,8 +307,8 @@ pub(crate) mod native {
             ruleset,
             store_forward_pat,
             |ctx, pat| {
-                let load_value = ctx.ctx.insert_get(pat.load, 0_i64);
-                let load_state = ctx.ctx.insert_get(pat.load, 1_i64);
+                let load_value = ctx.insert_get(pat.load, 0_i64);
+                let load_state = ctx.insert_get(pat.load, 1_i64);
 
                 ctx.union(load_value, pat.write_val);
                 ctx.union(load_state, pat.write);
@@ -336,8 +330,7 @@ pub(crate) mod native {
             shadowed_write_pat,
             |ctx, pat| {
                 let rewritten =
-                    ctx.ctx
-                        .insert_top(ctx.ctx.insert_write(), pat.addr, pat.write_val, pat.state);
+                    ctx.insert_top(ctx.insert_write(), pat.addr, pat.write_val, pat.state);
 
                 ctx.union(pat.second_write, rewritten);
             },

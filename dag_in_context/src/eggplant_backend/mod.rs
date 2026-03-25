@@ -19,7 +19,6 @@ mod loop_strength_reduction;
 mod loop_unroll;
 mod mem_simple;
 mod memory;
-mod native_rule_helpers;
 mod non_weakly_linear;
 mod passthrough;
 pub(crate) mod peepholes;
@@ -2350,8 +2349,8 @@ mod tests {
 
         for declaration in [
             ";; Loop Invariant",
-            "(relation is-inv-Expr (Expr Expr))",
-            "(relation is-inv-ListExpr (Expr ListExpr))",
+            "(relation IsInvExpr (Expr Expr))",
+            "(relation IsInvListExpr (Expr ListExpr))",
             "(function to-hoist (Expr Expr) Expr :merge new)",
             "(function to-hoist-size (Expr Expr) i64 :merge (max old new))",
             "(ruleset boundary-analysis)",
@@ -2669,7 +2668,7 @@ mod tests {
         for declaration in [
             ";; ORIGINAL",
             "(ruleset loop-strength-reduction)",
-            "(relation lsr-inv (Expr Expr Expr))",
+            "(relation LsrInv (Expr Expr Expr))",
             "(= old-loop (DoWhile inputs pred-and-outputs))",
             "(let new-inputs (Concat inputs (Single d-init)))",
             "(union old-loop (SubTuple new-loop 0 n))",

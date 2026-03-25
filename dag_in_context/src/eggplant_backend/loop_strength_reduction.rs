@@ -37,7 +37,7 @@ const LOOP_STRENGTH_REDUCTION_SUPPORT: &str = r#";; ORIGINAL
 ; Columns: body; value of invariant in inputs; value of invariant in outputs
 ;; Get the input and output value of an invariant, or constant int, within the loop
 ;;             loop in   out
-(relation lsr-inv (Expr Expr Expr))
+(relation LsrInv (Expr Expr Expr))
 
 ; Private temporary context for native feature-path execution.
 (constructor LsrTmpCtx (Expr Expr Expr) Assumption)"#;
@@ -60,7 +60,7 @@ const LOOP_STRENGTH_REDUCTION: &str = r#";; ORIGINAL
 ; Columns: body; value of invariant in inputs; value of invariant in outputs
 ;; Get the input and output value of an invariant, or constant int, within the loop
 ;;             loop in   out
-(relation lsr-inv (Expr Expr Expr))
+(relation LsrInv (Expr Expr Expr))
 
 ; TODO: there may be a bug with finding the invariant, or it just may not be extracted.
 ; Can make this work on loop_with_mul_by_inv and a rust test later.
@@ -75,7 +75,7 @@ const LOOP_STRENGTH_REDUCTION: &str = r#";; ORIGINAL
     (= constant (Const c out-type loop-output-ctx))
     (HasArgType inputs in-type)
     )
-    ((lsr-inv loop (Const c in-type loop-input-ctx) constant)) :ruleset always-run)
+    ((LsrInv loop (Const c in-type loop-input-ctx) constant)) :ruleset always-run)
 
 (rule 
     (
@@ -84,12 +84,12 @@ const LOOP_STRENGTH_REDUCTION: &str = r#";; ORIGINAL
         (ContextOf pred-and-outputs loop-ctx)
 
         ; Find loop variable (argument that gets incremented with an invariant)
-        (lsr-inv old-loop loop-incr-in loop-incr-out)
+        (LsrInv old-loop loop-incr-in loop-incr-out)
         ; Since the first el of pred-and-outputs is the pred, we need to offset i
         (= (Get pred-and-outputs (+ i 1)) (Bop (Add) (Get (Arg arg-type assm) i) loop-incr-out))
 
         ; Find invariant where input is same as output, or constant
-        (lsr-inv old-loop c-in c-out)
+        (LsrInv old-loop c-in c-out)
 
         ; Find multiplication of loop variable and invariant
         (= old-mul (Bop (Mul) c-out (Get (Arg arg-type assm) i)))
@@ -155,11 +155,11 @@ const LOOP_STRENGTH_REDUCTION: &str = r#";; ORIGINAL
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
+    use crate::eggplant_backend::schema_dsl::LsrInvPRRuleCtx;
     use eggplant::prelude::{
-        AsHandle, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     #[eggplant::pat_vars]
@@ -169,6 +169,9 @@ pub(crate) mod native {
         in_type: schema_dsl::Type,
         constant: schema_dsl::Const,
         c: schema_dsl::Constant,
+        inputs_context: schema_dsl::ContextOf,
+        body_context: schema_dsl::ContextOf,
+        inputs_have_type: schema_dsl::HasArgType,
     }
 
     fn loop_strength_reduction_const_invariant_pat<PR: PatRecSgl>(
@@ -183,32 +186,20 @@ pub(crate) mod native {
         let constant = schema_dsl::Const::query(&c, &out_type, &loop_output_ctx);
         let in_type = schema_dsl::Type::query_leaf();
 
-        let inputs_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                inputs.handle().into_handle_ty(),
-                loop_input_ctx.handle().into_handle_ty(),
-            ],
-        };
-        let body_context = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                pred_and_body.handle().into_handle_ty(),
-                loop_output_ctx.handle().into_handle_ty(),
-            ],
-        };
-        let inputs_have_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                inputs.handle().into_handle_ty(),
-                in_type.handle().into_handle_ty(),
-            ],
-        };
+        let inputs_context = schema_dsl::ContextOf::query_fields(&inputs, &loop_input_ctx);
+        let body_context = schema_dsl::ContextOf::query_fields(&pred_and_body, &loop_output_ctx);
+        let inputs_have_type = schema_dsl::HasArgType::query_fields(&inputs, &in_type);
 
-        LoopStrengthReductionConstInvariantPat::new(old_loop, loop_input_ctx, in_type, constant, c)
-            .assert(inputs_context)
-            .assert(body_context)
-            .assert(inputs_have_type)
+        LoopStrengthReductionConstInvariantPat::new(
+            old_loop,
+            loop_input_ctx,
+            in_type,
+            constant,
+            c,
+            inputs_context,
+            body_context,
+            inputs_have_type,
+        )
     }
 
     #[eggplant::pat_vars]
@@ -223,6 +214,10 @@ pub(crate) mod native {
         ty_list: schema_dsl::TypeList,
         arg_i: schema_dsl::Get,
         old_loop: schema_dsl::DoWhile,
+        pred_and_outputs_in_loop: schema_dsl::ContextOf,
+        loop_increment: schema_dsl::LsrInv,
+        invariant: schema_dsl::LsrInv,
+        mul_in_loop: schema_dsl::ContextOf,
     }
 
     fn loop_strength_reduction_pat<PR: PatRecSgl>() -> LoopStrengthReductionPat<PR> {
@@ -243,40 +238,16 @@ pub(crate) mod native {
         let add = schema_dsl::Bop::query(&schema_dsl::Add::query(), &arg_i, &loop_incr_out);
         let old_mul = schema_dsl::Bop::query(&schema_dsl::Mul::query(), &c_out, &arg_i);
 
-        let pred_and_outputs_in_loop = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                pred_and_outputs.handle().into_handle_ty(),
-                loop_ctx.handle().into_handle_ty(),
-            ],
-        };
-        let loop_increment = eggplant::wrap::FactCallConstraint {
-            op: "lsr-inv",
-            operands: vec![
-                old_loop.handle().into_handle_ty(),
-                loop_incr_in.handle().into_handle_ty(),
-                loop_incr_out.handle().into_handle_ty(),
-            ],
-        };
+        let pred_and_outputs_in_loop =
+            schema_dsl::ContextOf::query_fields(&pred_and_outputs, &loop_ctx);
+        let loop_increment =
+            schema_dsl::LsrInv::query_fields(&old_loop, &loop_incr_in, &loop_incr_out);
         let body_out_matches = body_out.handle().eq(&add.handle());
         let body_index_matches = body_out
             .handle_index()
             .eq(&(arg_i.handle_index() + (&1_i64).as_handle()));
-        let invariant = eggplant::wrap::FactCallConstraint {
-            op: "lsr-inv",
-            operands: vec![
-                old_loop.handle().into_handle_ty(),
-                c_in.handle().into_handle_ty(),
-                c_out.handle().into_handle_ty(),
-            ],
-        };
-        let mul_in_loop = eggplant::wrap::FactCallConstraint {
-            op: "ContextOf",
-            operands: vec![
-                old_mul.handle().into_handle_ty(),
-                loop_ctx.handle().into_handle_ty(),
-            ],
-        };
+        let invariant = schema_dsl::LsrInv::query_fields(&old_loop, &c_in, &c_out);
+        let mul_in_loop = schema_dsl::ContextOf::query_fields(&old_mul, &loop_ctx);
 
         LoopStrengthReductionPat::new(
             inputs,
@@ -289,13 +260,13 @@ pub(crate) mod native {
             ty_list,
             arg_i,
             old_loop,
+            pred_and_outputs_in_loop,
+            loop_increment,
+            invariant,
+            mul_in_loop,
         )
-        .assert(pred_and_outputs_in_loop)
-        .assert(loop_increment)
         .assert(body_out_matches)
         .assert(body_index_matches)
-        .assert(invariant)
-        .assert(mul_in_loop)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
@@ -307,19 +278,8 @@ pub(crate) mod native {
             always_run,
             loop_strength_reduction_const_invariant_pat,
             |ctx, pat| {
-                let input_constant = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Const",
-                    &[pat.c.val, pat.in_type.val, pat.loop_input_ctx.val],
-                );
-                ctx.insert_func_tbl(
-                    "lsr-inv",
-                    &[
-                        pat.old_loop.to_value(&ctx.ctx).val,
-                        input_constant.to_value(&ctx.ctx).val,
-                        pat.constant.to_value(&ctx.ctx).val,
-                    ],
-                );
+                let input_constant = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Const", &[pat.c.val, pat.in_type.val, pat.loop_input_ctx.val]));
+                ctx.insert_lsr_inv(pat.old_loop, input_constant, pat.constant);
             },
         );
 
@@ -329,206 +289,107 @@ pub(crate) mod native {
             loop_strength_reduction_pat,
             |ctx, pat| {
                 let zero = ctx._intern_base::<i64, i64>(0);
-                let n = ctx.lookup_expect("tuple-length", &[pat.inputs.to_value(&ctx.ctx).val]);
+                let n = ctx.lookup_expect("tuple-length", &[pat.inputs.to_value(&ctx).val]);
 
-                let mul_op = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Mul", &[]);
-                let add_op = insert_call::<schema_dsl::BinaryOp>(&ctx.ctx, "Add", &[]);
+                let mul_op = eggplant::wrap::Value::<schema_dsl::BinaryOp>::new((ctx).insert("Mul", &[]));
+                let add_op = eggplant::wrap::Value::<schema_dsl::BinaryOp>::new((ctx).insert("Add", &[]));
 
-                let addend = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        mul_op.0.val,
-                        pat.c_out.to_value(&ctx.ctx).val,
-                        pat.loop_incr_out.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let input_i = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[pat.inputs.to_value(&ctx.ctx).val, pat.arg_i.index.val],
-                );
-                let d_init = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        mul_op.0.val,
-                        pat.c_in.to_value(&ctx.ctx).val,
-                        input_i.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_inputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Concat",
-                    &[
-                        pat.inputs.to_value(&ctx.ctx).val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Single",
-                            &[d_init.to_value(&ctx.ctx).val],
-                        )
-                        .to_value(&ctx.ctx)
+                let addend = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Bop", &[
+                        mul_op.val,
+                        pat.c_out.to_value(&ctx).val,
+                        pat.loop_incr_out.to_value(&ctx).val,
+                    ]));
+                let input_i = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[pat.inputs.to_value(&ctx).val, pat.arg_i.index.val]));
+                let d_init = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Bop", &[
+                        mul_op.val,
+                        pat.c_in.to_value(&ctx).val,
+                        input_i.to_value(&ctx).val,
+                    ]));
+                let new_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                        pat.inputs.to_value(&ctx).val,
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[d_init.to_value(&ctx).val]))
+                        .to_value(&ctx)
                         .val,
-                    ],
-                );
+                    ]));
 
-                let int_ty = insert_call::<schema_dsl::BaseType>(&ctx.ctx, "IntT", &[]);
-                let tnil = insert_call::<schema_dsl::TypeList>(&ctx.ctx, "TNil", &[]);
-                let appended_tail = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
-                    "TCons",
-                    &[int_ty.0.val, tnil.0.val],
-                );
-                let new_ty_list = insert_call::<schema_dsl::TypeList>(
-                    &ctx.ctx,
-                    "TLConcat",
-                    &[
-                        pat.ty_list.to_value(&ctx.ctx).val,
-                        appended_tail.to_value(&ctx.ctx).val,
-                    ],
-                );
+                let int_ty = eggplant::wrap::Value::<schema_dsl::BaseType>::new((ctx).insert("IntT", &[]));
+                let tnil = eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
+                let appended_tail =
+                    eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TCons", &[int_ty.val, tnil.val]));
+                let new_ty_list = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TLConcat", &[
+                        pat.ty_list.to_value(&ctx).val,
+                        appended_tail.to_value(&ctx).val,
+                    ]));
                 let new_arg_ty =
-                    insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_ty_list.0.val]);
-                let tmp_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "LsrTmpCtx",
-                    &[
-                        new_inputs.to_value(&ctx.ctx).val,
-                        pat.pred_and_outputs.to_value(&ctx.ctx).val,
-                        pat.c_out.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let tmp_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Arg",
-                    &[
-                        new_arg_ty.to_value(&ctx.ctx).val,
-                        tmp_ctx.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let replace_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "SubTuple",
-                    &[tmp_arg.to_value(&ctx.ctx).val, zero, n],
-                );
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TupleT", &[new_ty_list.val]));
+                let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("LsrTmpCtx", &[
+                        new_inputs.to_value(&ctx).val,
+                        pat.pred_and_outputs.to_value(&ctx).val,
+                        pat.c_out.to_value(&ctx).val,
+                    ]));
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[new_arg_ty.to_value(&ctx).val, tmp_ctx.to_value(&ctx).val]));
+                let replace_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[tmp_arg.to_value(&ctx).val, zero, n]));
 
-                let d_out = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        add_op.0.val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Get",
-                            &[tmp_arg.to_value(&ctx.ctx).val, n],
-                        )
-                        .to_value(&ctx.ctx)
+                let d_out = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Bop", &[
+                        add_op.val,
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, n]))
+                        .to_value(&ctx)
                         .val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Subst",
-                            &[
-                                tmp_ctx.to_value(&ctx.ctx).val,
-                                replace_arg.to_value(&ctx.ctx).val,
-                                addend.to_value(&ctx.ctx).val,
-                            ],
-                        )
-                        .to_value(&ctx.ctx)
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                                tmp_ctx.to_value(&ctx).val,
+                                replace_arg.to_value(&ctx).val,
+                                addend.to_value(&ctx).val,
+                            ]))
+                        .to_value(&ctx)
                         .val,
-                    ],
-                );
-                let new_body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Concat",
-                    &[
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Subst",
-                            &[
-                                tmp_ctx.to_value(&ctx.ctx).val,
-                                replace_arg.to_value(&ctx.ctx).val,
-                                pat.pred_and_outputs.to_value(&ctx.ctx).val,
-                            ],
-                        )
-                        .to_value(&ctx.ctx)
+                    ]));
+                let new_body = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                                tmp_ctx.to_value(&ctx).val,
+                                replace_arg.to_value(&ctx).val,
+                                pat.pred_and_outputs.to_value(&ctx).val,
+                            ]))
+                        .to_value(&ctx)
                         .val,
-                        insert_call::<schema_dsl::Expr>(
-                            &ctx.ctx,
-                            "Single",
-                            &[d_out.to_value(&ctx.ctx).val],
-                        )
-                        .to_value(&ctx.ctx)
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[d_out.to_value(&ctx).val]))
+                        .to_value(&ctx)
                         .val,
-                    ],
-                );
-                let new_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "DoWhile",
-                    &[
-                        new_inputs.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let new_c = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Subst",
-                    &[
-                        tmp_ctx.to_value(&ctx.ctx).val,
-                        replace_arg.to_value(&ctx.ctx).val,
-                        pat.c_out.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let loop_ctx = insert_call::<schema_dsl::Assumption>(
-                    &ctx.ctx,
-                    "InLoop",
-                    &[
-                        new_inputs.to_value(&ctx.ctx).val,
-                        new_body.to_value(&ctx.ctx).val,
-                    ],
-                );
+                    ]));
+                let new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("DoWhile", &[new_inputs.to_value(&ctx).val, new_body.to_value(&ctx).val]));
+                let new_c = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                        tmp_ctx.to_value(&ctx).val,
+                        replace_arg.to_value(&ctx).val,
+                        pat.c_out.to_value(&ctx).val,
+                    ]));
+                let loop_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InLoop", &[new_inputs.to_value(&ctx).val, new_body.to_value(&ctx).val]));
                 ctx.union(tmp_ctx, loop_ctx);
 
-                let new_mul_input = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[replace_arg.to_value(&ctx.ctx).val, pat.arg_i.index.val],
-                );
-                let new_mul = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Bop",
-                    &[
-                        mul_op.0.val,
-                        new_c.to_value(&ctx.ctx).val,
-                        new_mul_input.to_value(&ctx.ctx).val,
-                    ],
-                );
-                let tmp_arg_n = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Get",
-                    &[tmp_arg.to_value(&ctx.ctx).val, n],
-                );
+                let new_mul_input = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[replace_arg.to_value(&ctx).val, pat.arg_i.index.val]));
+                let new_mul = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Bop", &[
+                        mul_op.val,
+                        new_c.to_value(&ctx).val,
+                        new_mul_input.to_value(&ctx).val,
+                    ]));
+                let tmp_arg_n =
+                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, n]));
                 ctx.union(tmp_arg_n, new_mul);
                 ctx.subsume(
                     "Bop",
                     &[
-                        mul_op.0.val,
-                        new_c.to_value(&ctx.ctx).val,
-                        new_mul_input.to_value(&ctx.ctx).val,
+                        mul_op.val,
+                        new_c.to_value(&ctx).val,
+                        new_mul_input.to_value(&ctx).val,
                     ],
                 );
 
-                let projected_loop = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "SubTuple",
-                    &[new_loop.to_value(&ctx.ctx).val, zero, n],
-                );
+                let projected_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[new_loop.to_value(&ctx).val, zero, n]));
                 ctx.union(pat.old_loop, projected_loop);
                 ctx.remove(
                     "LsrTmpCtx",
                     &[
-                        new_inputs.to_value(&ctx.ctx).val,
-                        pat.pred_and_outputs.to_value(&ctx.ctx).val,
-                        pat.c_out.to_value(&ctx.ctx).val,
+                        new_inputs.to_value(&ctx).val,
+                        pat.pred_and_outputs.to_value(&ctx).val,
+                        pat.c_out.to_value(&ctx).val,
                     ],
                 );
             },

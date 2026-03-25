@@ -432,29 +432,29 @@ pub(crate) mod native {
             function_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.child_size) + 1;
-                insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
             },
         );
         PeepholeTx::add_rule("expr_size_const", always_run, const_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, 1);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 1);
         });
         PeepholeTx::add_rule("expr_size_top", always_run, top_size_pat, |ctx, pat| {
             let size =
                 ctx.devalue(pat.a_size) + ctx.devalue(pat.b_size) + ctx.devalue(pat.c_size) + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
         PeepholeTx::add_rule("expr_size_bop", always_run, bop_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size) + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
         PeepholeTx::add_rule("expr_size_uop", always_run, uop_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
         PeepholeTx::add_rule("expr_size_get", always_run, get_size_pat, |ctx, pat| {
             insert_expr_size(
-                &ctx.ctx,
-                pat.expr.to_value(&ctx.ctx).val,
+                &ctx,
+                pat.expr.to_value(&ctx).val,
                 ctx.devalue(pat.child_size),
             );
         });
@@ -464,7 +464,7 @@ pub(crate) mod native {
             concat_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size);
-                insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
             },
         );
         PeepholeTx::add_rule(
@@ -473,8 +473,8 @@ pub(crate) mod native {
             single_size_pat,
             |ctx, pat| {
                 insert_expr_size(
-                    &ctx.ctx,
-                    pat.expr.to_value(&ctx.ctx).val,
+                    &ctx,
+                    pat.expr.to_value(&ctx).val,
                     ctx.devalue(pat.child_size),
                 );
             },
@@ -488,7 +488,7 @@ pub(crate) mod native {
                     + ctx.devalue(pat.inputs_size)
                     + ctx.devalue(pat.branches_size)
                     + 1;
-                insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
             },
         );
         PeepholeTx::add_rule("expr_size_if", always_run, if_size_pat, |ctx, pat| {
@@ -497,7 +497,7 @@ pub(crate) mod native {
                 + ctx.devalue(pat.then_size)
                 + ctx.devalue(pat.else_size)
                 + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
         PeepholeTx::add_rule(
             "expr_size_dowhile",
@@ -505,18 +505,18 @@ pub(crate) mod native {
             dowhile_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size) + 1;
-                insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
             },
         );
         PeepholeTx::add_rule("expr_size_arg", always_run, arg_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, 1);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 1);
         });
         PeepholeTx::add_rule("expr_size_call", always_run, call_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
         PeepholeTx::add_rule("expr_size_empty", always_run, empty_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, 0);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 0);
         });
         PeepholeTx::add_rule(
             "list_expr_size_cons",
@@ -524,7 +524,7 @@ pub(crate) mod native {
             cons_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.head_size) + ctx.devalue(pat.tail_size);
-                insert_list_expr_size(&ctx.ctx, pat.list.to_value(&ctx.ctx).val, size);
+                insert_list_expr_size(&ctx, pat.list.to_value(&ctx).val, size);
             },
         );
         PeepholeTx::add_rule(
@@ -532,12 +532,12 @@ pub(crate) mod native {
             always_run,
             nil_size_pat,
             |ctx, pat| {
-                insert_list_expr_size(&ctx.ctx, pat.list.to_value(&ctx.ctx).val, 0);
+                insert_list_expr_size(&ctx, pat.list.to_value(&ctx).val, 0);
             },
         );
         PeepholeTx::add_rule("expr_size_alloc", always_run, alloc_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx.ctx, pat.expr.to_value(&ctx.ctx).val, size);
+            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
         });
 
         always_run

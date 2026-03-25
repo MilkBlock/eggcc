@@ -185,8 +185,8 @@ pub(crate) mod native {
             },
             |ctx, pat| {
                 let sum = ctx.devalue(pat.lhs_int.value) + ctx.devalue(pat.rhs_int.value);
-                let folded = ctx.ctx.insert_int(sum);
-                let folded = ctx.ctx.insert_const(folded, pat.ty, pat.ctx);
+                let folded = ctx.insert_int(sum);
+                let folded = ctx.insert_const(folded, pat.ty, pat.ctx);
                 ctx.union(pat.add, folded);
             },
         );

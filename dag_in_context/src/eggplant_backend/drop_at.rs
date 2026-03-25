@@ -335,7 +335,6 @@ const DROP_AT_CONCAT_RULE: &str = r#"(rule ((= lhs (DropAtInternal newty newctx 
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::native_rule_helpers::insert_call;
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
@@ -389,6 +388,7 @@ pub(crate) mod native {
         idx: i64,
         input: schema_dsl::Expr,
         old_tylist: schema_dsl::TypeList,
+        has_arg_type: schema_dsl::HasArgType,
     }
 
     #[eggplant::pat_vars]
@@ -425,6 +425,7 @@ pub(crate) mod native {
         first: schema_dsl::Expr,
         second: schema_dsl::Expr,
         third: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -436,6 +437,7 @@ pub(crate) mod native {
         op: schema_dsl::BinaryOp,
         lhs_inner: schema_dsl::Expr,
         rhs_inner: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -446,6 +448,7 @@ pub(crate) mod native {
         idx: i64,
         op: schema_dsl::UnaryOp,
         inner: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -456,6 +459,7 @@ pub(crate) mod native {
         idx: i64,
         inner: schema_dsl::Expr,
         index: i64,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -468,6 +472,7 @@ pub(crate) mod native {
         amount: schema_dsl::Expr,
         state_edge: schema_dsl::Expr,
         pointer_ty: schema_dsl::BaseType,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -478,6 +483,7 @@ pub(crate) mod native {
         idx: i64,
         call: schema_dsl::Call,
         arg: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -489,6 +495,7 @@ pub(crate) mod native {
         pred: schema_dsl::Expr,
         inputs: schema_dsl::Expr,
         branches: schema_dsl::ListExpr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -501,6 +508,7 @@ pub(crate) mod native {
         inputs: schema_dsl::Expr,
         then_branch: schema_dsl::Expr,
         else_branch: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -511,6 +519,7 @@ pub(crate) mod native {
         idx: i64,
         inputs: schema_dsl::Expr,
         body: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -523,6 +532,7 @@ pub(crate) mod native {
         input_ty: schema_dsl::Type,
         output_ty: schema_dsl::Type,
         body: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -532,6 +542,7 @@ pub(crate) mod native {
         new_ctx: schema_dsl::Assumption,
         idx: i64,
         inner: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     #[eggplant::pat_vars]
@@ -542,6 +553,7 @@ pub(crate) mod native {
         idx: i64,
         lhs_inner: schema_dsl::Expr,
         rhs_inner: schema_dsl::Expr,
+        expr_is_resolved: schema_dsl::ExprIsResolved,
     }
 
     fn drop_at_seed_pat<PR: PatRecSgl>() -> DropAtSeedPat<PR> {
@@ -559,17 +571,10 @@ pub(crate) mod native {
                 input.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = eggplant::wrap::FactCallConstraint {
-            op: "HasArgType",
-            operands: vec![
-                input.handle().into_handle_ty(),
-                input_ty.handle().into_handle_ty(),
-            ],
-        };
+        let has_arg_type = schema_dsl::HasArgType::query_fields(&input, &input_ty);
 
-        DropAtSeedPat::new(lhs, ctx, idx, input, old_tylist)
+        DropAtSeedPat::new(lhs, ctx, idx, input, old_tylist, has_arg_type)
             .assert(lhs_is_drop_at)
-            .assert(has_arg_type)
     }
 
     fn drop_at_arg_get_pat<PR: PatRecSgl>() -> DropAtArgGetPat<PR> {
@@ -660,14 +665,20 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtTopPat::new(lhs, new_ty, new_ctx, idx, op, first, second, third)
+        DropAtTopPat::new(
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            op,
+            first,
+            second,
+            third,
+            expr_is_resolved,
+        )
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_bop_pat<PR: PatRecSgl>() -> DropAtBopPat<PR> {
@@ -688,14 +699,19 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtBopPat::new(lhs, new_ty, new_ctx, idx, op, lhs_inner, rhs_inner)
+        DropAtBopPat::new(
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            op,
+            lhs_inner,
+            rhs_inner,
+            expr_is_resolved,
+        )
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_uop_pat<PR: PatRecSgl>() -> DropAtUopPat<PR> {
@@ -715,14 +731,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtUopPat::new(lhs, new_ty, new_ctx, idx, op, inner)
+        DropAtUopPat::new(lhs, new_ty, new_ctx, idx, op, inner, expr_is_resolved)
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_get_pat<PR: PatRecSgl>() -> DropAtGetPat<PR> {
@@ -743,15 +755,11 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtGetPat::new(lhs, new_ty, new_ctx, idx, inner, index)
+        DropAtGetPat::new(lhs, new_ty, new_ctx, idx, inner, index, expr_is_resolved)
             .assert(matched_index)
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_alloc_pat<PR: PatRecSgl>() -> DropAtAllocPat<PR> {
@@ -772,16 +780,20 @@ pub(crate) mod native {
                 alloc.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![alloc.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&alloc);
 
         DropAtAllocPat::new(
-            lhs, new_ty, new_ctx, idx, alloc, amount, state_edge, pointer_ty,
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            alloc,
+            amount,
+            state_edge,
+            pointer_ty,
+            expr_is_resolved,
         )
         .assert(lhs_is_drop_internal)
-        .assert(expr_is_resolved)
     }
 
     fn drop_at_call_pat<PR: PatRecSgl>() -> DropAtCallPat<PR> {
@@ -800,14 +812,10 @@ pub(crate) mod native {
                 call.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![call.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&call);
 
-        DropAtCallPat::new(lhs, new_ty, new_ctx, idx, call, arg)
+        DropAtCallPat::new(lhs, new_ty, new_ctx, idx, call, arg, expr_is_resolved)
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_switch_pat<PR: PatRecSgl>() -> DropAtSwitchPat<PR> {
@@ -828,14 +836,19 @@ pub(crate) mod native {
                 switch.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![switch.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&switch);
 
-        DropAtSwitchPat::new(lhs, new_ty, new_ctx, idx, pred, inputs, branches)
+        DropAtSwitchPat::new(
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            pred,
+            inputs,
+            branches,
+            expr_is_resolved,
+        )
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_if_pat<PR: PatRecSgl>() -> DropAtIfPat<PR> {
@@ -857,10 +870,7 @@ pub(crate) mod native {
                 if_expr.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![if_expr.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&if_expr);
 
         DropAtIfPat::new(
             lhs,
@@ -871,9 +881,9 @@ pub(crate) mod native {
             inputs,
             then_branch,
             else_branch,
+            expr_is_resolved,
         )
         .assert(lhs_is_drop_internal)
-        .assert(expr_is_resolved)
     }
 
     fn drop_at_dowhile_pat<PR: PatRecSgl>() -> DropAtDoWhilePat<PR> {
@@ -893,14 +903,10 @@ pub(crate) mod native {
                 loop_expr.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![loop_expr.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&loop_expr);
 
-        DropAtDoWhilePat::new(lhs, new_ty, new_ctx, idx, inputs, body)
+        DropAtDoWhilePat::new(lhs, new_ty, new_ctx, idx, inputs, body, expr_is_resolved)
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_function_pat<PR: PatRecSgl>() -> DropAtFunctionPat<PR> {
@@ -921,16 +927,20 @@ pub(crate) mod native {
                 function.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![body.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&body);
 
         DropAtFunctionPat::new(
-            lhs, new_ty, new_ctx, idx, function, input_ty, output_ty, body,
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            function,
+            input_ty,
+            output_ty,
+            body,
+            expr_is_resolved,
         )
         .assert(lhs_is_drop_internal)
-        .assert(expr_is_resolved)
     }
 
     fn drop_at_single_pat<PR: PatRecSgl>() -> DropAtSinglePat<PR> {
@@ -949,14 +959,10 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtSinglePat::new(lhs, new_ty, new_ctx, idx, inner)
+        DropAtSinglePat::new(lhs, new_ty, new_ctx, idx, inner, expr_is_resolved)
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     fn drop_at_concat_pat<PR: PatRecSgl>() -> DropAtConcatPat<PR> {
@@ -976,84 +982,73 @@ pub(crate) mod native {
                 matched.handle().into_handle_ty(),
             ],
         ));
-        let expr_is_resolved = eggplant::wrap::FactCallConstraint {
-            op: "ExprIsResolved",
-            operands: vec![matched.handle().into_handle_ty()],
-        };
+        let expr_is_resolved = schema_dsl::ExprIsResolved::query_fields(&matched);
 
-        DropAtConcatPat::new(lhs, new_ty, new_ctx, idx, lhs_inner, rhs_inner)
+        DropAtConcatPat::new(
+            lhs,
+            new_ty,
+            new_ctx,
+            idx,
+            lhs_inner,
+            rhs_inner,
+            expr_is_resolved,
+        )
             .assert(lhs_is_drop_internal)
-            .assert(expr_is_resolved)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
         let ruleset = RuleSetId("drop");
 
         PeepholeTx::add_rule("drop_at_seed", ruleset, drop_at_seed_pat, |ctx, pat| {
-            let new_tylist = insert_call::<schema_dsl::TypeList>(
-                &ctx.ctx,
-                "TypeListRemoveAt",
-                &[pat.old_tylist.val, pat.idx.val],
+            let new_tylist = eggplant::wrap::Value::<schema_dsl::TypeList>::new(
+                (&ctx).insert("TypeListRemoveAt", &[pat.old_tylist.val, pat.idx.val]),
             );
-            let new_ty = insert_call::<schema_dsl::Type>(&ctx.ctx, "TupleT", &[new_tylist.0.val]);
+            let new_ty = eggplant::wrap::Value::<schema_dsl::Type>::new(
+                (ctx).insert("TupleT", &[new_tylist.val]),
+            );
             ctx.union(
                 pat.lhs,
-                insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAtInternal",
-                    &[new_ty.0.val, pat.ctx.val, pat.idx.val, pat.input.val],
-                ),
+                    &[new_ty.val, pat.ctx.val, pat.idx.val, pat.input.val],
+                )),
             );
         });
         PeepholeTx::add_rule("drop_at_const", ruleset, drop_at_const_pat, |ctx, pat| {
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "Const",
                 &[pat.constant.val, pat.new_ty.val, pat.new_ctx.val],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            ));
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_empty", ruleset, drop_at_empty_pat, |ctx, pat| {
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Empty",
-                &[pat.new_ty.val, pat.new_ctx.val],
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Empty", &[pat.new_ty.val, pat.new_ctx.val]),
             );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_top", ruleset, drop_at_top_pat, |ctx, pat| {
-            let first = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let first = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.first.val],
-            );
-            let second = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let second = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.second.val],
-            );
-            let third = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let third = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.third.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Top", &[pat.op.val, first.val, second.val, third.val]),
             );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Top",
-                &[pat.op.val, first.0.val, second.0.val, third.0.val],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule(
@@ -1067,29 +1062,25 @@ pub(crate) mod native {
                     return;
                 }
 
-                let new_arg = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "Arg",
-                    &[pat.new_ty.val, pat.new_ctx.val],
+                let new_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("Arg", &[pat.new_ty.val, pat.new_ctx.val]),
                 );
                 let new_index = if source_index < idx {
                     pat.source_index.val
                 } else {
                     ctx._intern_base::<i64, i64>(source_index - 1)
                 };
-                let rewritten =
-                    insert_call::<schema_dsl::Expr>(&ctx.ctx, "Get", &[new_arg.0.val, new_index]);
+                let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (ctx).insert("Get", &[new_arg.val, new_index]),
+                );
 
-                let _ = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "DelayedDropUnion",
-                    &[pat.lhs.val, rewritten.0.val],
+                let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
                 );
             },
         );
         PeepholeTx::add_rule("drop_at_bop", ruleset, drop_at_bop_pat, |ctx, pat| {
-            let lhs_inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let lhs_inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[
                     pat.new_ty.val,
@@ -1097,9 +1088,8 @@ pub(crate) mod native {
                     pat.idx.val,
                     pat.lhs_inner.val,
                 ],
-            );
-            let rhs_inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let rhs_inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[
                     pat.new_ty.val,
@@ -1107,54 +1097,44 @@ pub(crate) mod native {
                     pat.idx.val,
                     pat.rhs_inner.val,
                 ],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Bop", &[pat.op.val, lhs_inner.val, rhs_inner.val]),
             );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Bop",
-                &[pat.op.val, lhs_inner.0.val, rhs_inner.0.val],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_uop", ruleset, drop_at_uop_pat, |ctx, pat| {
-            let inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inner.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Uop", &[pat.op.val, inner.val]),
             );
-            let rewritten =
-                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Uop", &[pat.op.val, inner.0.val]);
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_get", ruleset, drop_at_get_pat, |ctx, pat| {
-            let inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inner.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Get", &[inner.val, pat.index.val]),
             );
-            let rewritten =
-                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Get", &[inner.0.val, pat.index.val]);
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_alloc", ruleset, drop_at_alloc_pat, |ctx, pat| {
-            let amount = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let amount = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.amount.val],
-            );
-            let state_edge = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let state_edge = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[
                     pat.new_ty.val,
@@ -1162,84 +1142,68 @@ pub(crate) mod native {
                     pat.idx.val,
                     pat.state_edge.val,
                 ],
-            );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "Alloc",
                 &[
                     pat.alloc.id.val,
-                    amount.0.val,
-                    state_edge.0.val,
+                    amount.val,
+                    state_edge.val,
                     pat.pointer_ty.val,
                 ],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            ));
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_call", ruleset, drop_at_call_pat, |ctx, pat| {
-            let arg = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.arg.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Call", &[pat.call.name.val, arg.val]),
             );
-            let rewritten =
-                insert_call::<schema_dsl::Expr>(&ctx.ctx, "Call", &[pat.call.name.val, arg.0.val]);
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_switch", ruleset, drop_at_switch_pat, |ctx, pat| {
-            let pred = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let pred = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.pred.val],
-            );
-            let inputs = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inputs.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Switch", &[pred.val, inputs.val, pat.branches.val]),
             );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Switch",
-                &[pred.0.val, inputs.0.val, pat.branches.val],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_if", ruleset, drop_at_if_pat, |ctx, pat| {
-            let pred = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let pred = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.pred.val],
-            );
-            let inputs = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inputs.val],
-            );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "If",
                 &[
-                    pred.0.val,
-                    inputs.0.val,
+                    pred.val,
+                    inputs.val,
                     pat.then_branch.val,
                     pat.else_branch.val,
                 ],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            ));
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule(
@@ -1247,20 +1211,15 @@ pub(crate) mod native {
             ruleset,
             drop_at_dowhile_pat,
             |ctx, pat| {
-                let inputs = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAtInternal",
                     &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inputs.val],
+                ));
+                let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (ctx).insert("DoWhile", &[inputs.val, pat.body.val]),
                 );
-                let rewritten = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "DoWhile",
-                    &[inputs.0.val, pat.body.val],
-                );
-                let _ = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
-                    "DelayedDropUnion",
-                    &[pat.lhs.val, rewritten.0.val],
+                let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
                 );
             },
         );
@@ -1269,40 +1228,36 @@ pub(crate) mod native {
             ruleset,
             drop_at_function_pat,
             |ctx, pat| {
-                let body = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                let body = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "DropAtInternal",
                     &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.body.val],
-                );
-                let rewritten = insert_call::<schema_dsl::Expr>(
-                    &ctx.ctx,
+                ));
+                let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Function",
                     &[
                         pat.function.name.val,
                         pat.input_ty.val,
                         pat.output_ty.val,
-                        body.0.val,
+                        body.val,
                     ],
-                );
+                ));
                 ctx.union(pat.lhs, rewritten);
             },
         );
         PeepholeTx::add_rule("drop_at_single", ruleset, drop_at_single_pat, |ctx, pat| {
-            let inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[pat.new_ty.val, pat.new_ctx.val, pat.idx.val, pat.inner.val],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (ctx).insert("Single", &[inner.val]),
             );
-            let rewritten = insert_call::<schema_dsl::Expr>(&ctx.ctx, "Single", &[inner.0.val]);
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
         PeepholeTx::add_rule("drop_at_concat", ruleset, drop_at_concat_pat, |ctx, pat| {
-            let lhs_inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            let lhs_inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[
                     pat.new_ty.val,
@@ -1310,9 +1265,8 @@ pub(crate) mod native {
                     pat.idx.val,
                     pat.lhs_inner.val,
                 ],
-            );
-            let rhs_inner = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
+            ));
+            let rhs_inner = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                 "DropAtInternal",
                 &[
                     pat.new_ty.val,
@@ -1320,16 +1274,12 @@ pub(crate) mod native {
                     pat.idx.val,
                     pat.rhs_inner.val,
                 ],
+            ));
+            let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("Concat", &[lhs_inner.val, rhs_inner.val]),
             );
-            let rewritten = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "Concat",
-                &[lhs_inner.0.val, rhs_inner.0.val],
-            );
-            let _ = insert_call::<schema_dsl::Expr>(
-                &ctx.ctx,
-                "DelayedDropUnion",
-                &[pat.lhs.val, rewritten.0.val],
+            let _ = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert("DelayedDropUnion", &[pat.lhs.val, rewritten.val]),
             );
         });
 
