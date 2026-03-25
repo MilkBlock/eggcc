@@ -29,14 +29,14 @@
         (= e1 (Uop o x))
         (HasType e1 (Base ty))
         (= (TCPair t1 c1) (ExtractedExpr e1))
-        (> 10 (Expr-size e1))
+        (> 10 (expr_size e1))
         (ExprIsPure e1)
         (ContextOf e1 (InIf true pred orig_ins))
 
         (= e2 (Uop o y))
         (HasType e2 (Base ty))
         (= (TCPair t2 c2) (ExtractedExpr e2))
-        (> 10 (Expr-size e2))
+        (> 10 (expr_size e2))
         (ExprIsPure e2)
         (ContextOf e2 (InIf false pred orig_ins))
 
@@ -103,7 +103,7 @@
         (= e2 (Bop o x2 y2))
         
         (= (TCPair t1 c1) (ExtractedExpr e1))
-        (> 10 (Expr-size e1))
+        (> 10 (expr_size e1))
         (ExprIsPure e1)
         (HasType e1 (Base ty))
         
@@ -111,7 +111,7 @@
         
         (HasType e2 (Base ty))
         (= (TCPair t2 c2) (ExtractedExpr e2))
-        (> 10 (Expr-size e2))
+        (> 10 (expr_size e2))
         (ExprIsPure e2)
 
         (= t1 t2)

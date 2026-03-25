@@ -27,9 +27,9 @@
 ;; thing to hoist at a time
 ;; This is an evil hack!
 ;                   inputs body invariant-expr
-(function to-hoist (Expr Expr) Expr :merge new)
+(function to_hoist (Expr Expr) Expr :merge new)
 ;; The biggest invariant expression's size
-(function to-hoist-size (Expr Expr) i64 :merge (max old new))
+(function to_hoist_size (Expr Expr) i64 :merge (max old new))
 
 ;; figure out max cost of invariant to hoist
 ;; pick a random invariant expression
@@ -37,23 +37,23 @@
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
-       (= size (Expr-size expr)))
-      ((set (to-hoist-size inputs body) size)) :ruleset boundary-analysis-prep)
+       (= size (expr_size expr)))
+      ((set (to_hoist_size inputs body) size)) :ruleset boundary-analysis-prep)
 
 ;; pick a bigger one if possible
 (rule ((IsInvExpr body expr)
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
-       (= (Expr-size expr) (to-hoist-size inputs body)))
-      ((set (to-hoist inputs body) expr)) :ruleset boundary-analysis)
+       (= (expr_size expr) (to_hoist_size inputs body)))
+      ((set (to_hoist inputs body) expr)) :ruleset boundary-analysis)
 
 ;; mock function
 (ruleset loop-inv-motion)
 
-(rule ((= (to-hoist in body) inv)
-       (> (Expr-size inv) 1)
-       ;; TODO: replace Expr-size when cost model is ready
+(rule ((= (to_hoist in body) inv)
+       (> (expr_size inv) 1)
+       ;; TODO: replace expr_size when cost model is ready
        (= loop (DoWhile in body))
        ;; the outter assumption of the loop 
        (ContextOf loop loop_ctx)
@@ -62,7 +62,7 @@
        (= inv_type (Base base_inv_ty))
        (= in_type (TupleT tylist))
        (= len (tuple-length in))
-       (= iter-guess (LoopNumItersGuess in body)))
+       (= iter-guess (loop_num_iters_guess in body)))
       ((RELIESONCONTEXT)
        (let new_input (Concat in (Single (Subst loop_ctx in inv))))
        (let new_input_type (TupleT (TLConcat tylist (TCons base_inv_ty (TNil)))))
@@ -86,6 +86,6 @@
        (union loop wrapper)
        (subsume (DoWhile in body)) 
        (delete (TmpCtx))
-       (set (LoopNumItersGuess new_input new_body) iter-guess)
+       (set (loop_num_iters_guess new_input new_body) iter-guess)
       )
        :ruleset loop-inv-motion)

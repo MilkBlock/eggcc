@@ -135,6 +135,31 @@ pub(crate) enum ListExpr {
 }
 
 #[eggplant::dsl]
+pub(crate) enum IVTRes {
+    #[eggplant::precedence(100)]
+    IVTAnalysisRes {
+        perm: Expr,
+        passthrough_perm: Expr,
+        passthrough_tys: TypeList,
+        len: i64,
+    },
+    #[eggplant::precedence(95)]
+    IVTMin { lhs: IVTRes, rhs: IVTRes },
+}
+
+#[eggplant::dsl]
+pub(crate) enum Node {
+    #[eggplant::precedence(100)]
+    IfNode {
+        if_eclass: Expr,
+        pred: Expr,
+        inputs: Expr,
+        then_branch: Expr,
+        else_branch: Expr,
+    },
+}
+
+#[eggplant::dsl]
 pub(crate) enum Term {
     #[eggplant::typst("text(\"opaque\")")]
     #[eggplant::precedence(100)]

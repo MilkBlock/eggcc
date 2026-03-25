@@ -52,9 +52,9 @@ const LOOP_INVARIANT_SUPPORT: &str = r#";; Loop Invariant
 ;; thing to hoist at a time
 ;; This is an evil hack!
 ;                   inputs body invariant-expr
-(function to-hoist (Expr Expr) Expr :merge new)
+(function to_hoist (Expr Expr) Expr :merge new)
 ;; The biggest invariant expression's size
-(function to-hoist-size (Expr Expr) i64 :merge (max old new))
+(function to_hoist_size (Expr Expr) i64 :merge (max old new))
 
 ;; mock function
 (ruleset loop-inv-motion)"#;
@@ -87,9 +87,9 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
 ;; thing to hoist at a time
 ;; This is an evil hack!
 ;                   inputs body invariant-expr
-(function to-hoist (Expr Expr) Expr :merge new)
+(function to_hoist (Expr Expr) Expr :merge new)
 ;; The biggest invariant expression's size
-(function to-hoist-size (Expr Expr) i64 :merge (max old new))
+(function to_hoist_size (Expr Expr) i64 :merge (max old new))
 
 ;; figure out max cost of invariant to hoist
 ;; pick a random invariant expression
@@ -97,23 +97,23 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
-       (= size (Expr-size expr)))
-      ((set (to-hoist-size inputs body) size)) :ruleset boundary-analysis-prep)
+       (= size (expr_size expr)))
+      ((set (to_hoist_size inputs body) size)) :ruleset boundary-analysis-prep)
 
 ;; pick a bigger one if possible
 (rule ((IsInvExpr body expr)
        (DoWhile inputs body)
        (HasType expr inv_type)
        (= inv_type (Base base_inv_ty))
-       (= (Expr-size expr) (to-hoist-size inputs body)))
-      ((set (to-hoist inputs body) expr)) :ruleset boundary-analysis)
+       (= (expr_size expr) (to_hoist_size inputs body)))
+      ((set (to_hoist inputs body) expr)) :ruleset boundary-analysis)
 
 ;; mock function
 (ruleset loop-inv-motion)
 
-(rule ((= (to-hoist in body) inv)
-       (> (Expr-size inv) 1)
-       ;; TODO: replace Expr-size when cost model is ready
+(rule ((= (to_hoist in body) inv)
+       (> (expr_size inv) 1)
+       ;; TODO: replace expr_size when cost model is ready
        (= loop (DoWhile in body))
        ;; the outter assumption of the loop 
        (ContextOf loop loop_ctx)
@@ -122,7 +122,7 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
        (= inv_type (Base base_inv_ty))
        (= in_type (TupleT tylist))
        (= len (tuple-length in))
-       (= iter-guess (LoopNumItersGuess in body)))
+       (= iter-guess (loop_num_iters_guess in body)))
       ((RELIESONCONTEXT)
        (let new_input (Concat in (Single (Subst loop_ctx in inv))))
        (let new_input_type (TupleT (TLConcat tylist (TCons base_inv_ty (TNil)))))
@@ -146,13 +146,16 @@ const LOOP_INVARIANT: &str = r#";; Loop Invariant
        (union loop wrapper)
        (subsume (DoWhile in body)) 
        (delete (TmpCtx))
-       (set (LoopNumItersGuess new_input new_body) iter-guess)
+       (set (loop_num_iters_guess new_input new_body) iter-guess)
       )
        :ruleset loop-inv-motion)"#;
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
+    #![allow(non_camel_case_types)]
+
     use super::super::schema_dsl;
+    use super::super::schema_dsl::Expr;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use crate::eggplant_backend::schema_dsl::{
         AssumptionPRRuleCtx, ExprPRRuleCtx, IsInvExprPRRuleCtx, IsInvListExprHelperPRRuleCtx,
@@ -162,6 +165,27 @@ pub(crate) mod native {
         prim_call, AsHandle, BaseVar, Compare, Insertable, IntoHandleTy, PEq, PatRecSgl,
         RuleRunnerSgl, RuleSetId,
     };
+
+    #[allow(non_camel_case_types)]
+    #[eggplant::func(output = Expr, merge = "new")]
+    pub(crate) struct to_hoist {
+        inputs: Expr,
+        body: Expr,
+    }
+
+    #[allow(non_camel_case_types)]
+    #[eggplant::func(output = i64, merge = "(max old new)")]
+    pub(crate) struct to_hoist_size {
+        inputs: Expr,
+        body: Expr,
+    }
+
+    #[allow(non_camel_case_types)]
+    #[eggplant::func(output = i64, merge = "(max 1 (min old new))")]
+    pub(crate) struct loop_num_iters_guess {
+        inputs: Expr,
+        outputs: Expr,
+    }
 
     #[eggplant::pat_vars]
     struct LoopInvariantListHelperSeedPat<PR: PatRecSgl> {
@@ -303,10 +327,7 @@ pub(crate) mod native {
         expr: &schema_dsl::Expr<PR>,
         size: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        size.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![expr.handle().into_handle_ty()],
-        ))
+        size.handle().eq(&crate::eggplant_backend::expr_size::native::expr_size::query(expr).handle())
     }
 
     fn list_expr_length_query<PR: PatRecSgl>(
@@ -794,13 +815,7 @@ pub(crate) mod native {
         let expr_is_inv = is_inv_expr(&body, &expr);
         let expr_has_base_type = schema_dsl::HasType::query_fields(&expr, &base_inv_expr_ty);
         let expr_size = expr_size_query(&expr, &size);
-        let matches_best_size = size.handle().eq(&prim_call::<i64>(
-            "to-hoist-size",
-            vec![
-                inputs.handle().into_handle_ty(),
-                body.handle().into_handle_ty(),
-            ],
-        ));
+        let matches_best_size = size.handle().eq(&to_hoist_size::query(&inputs, &body).handle());
 
         LoopInvariantBoundaryAnalysisPickPat::new(
             inputs,
@@ -842,13 +857,7 @@ pub(crate) mod native {
         let input_has_tuple_type = schema_dsl::HasType::query_fields(&in_expr, &input_tuple_ty);
         let invariant_has_base_type = schema_dsl::HasType::query_fields(&inv, &invariant_base_ty);
         let inv_size = BaseVar::<i64, PR>::query_named("inv_size");
-        let hoisted_inv = inv.handle().eq(&prim_call::<schema_dsl::Expr>(
-            "to-hoist",
-            vec![
-                in_expr.handle().into_handle_ty(),
-                body.handle().into_handle_ty(),
-            ],
-        ));
+        let hoisted_inv = inv.handle().eq(&to_hoist::query(&in_expr, &body).handle());
         let inv_size_fact = expr_size_query(&inv, &inv_size);
         let inv_is_large_enough = inv_size.handle().gt(&1_i64);
         let len = BaseVar::<i64, PR>::query_named("len");
@@ -857,13 +866,9 @@ pub(crate) mod native {
             "tuple-length",
             vec![in_expr.handle().into_handle_ty()],
         ));
-        let iter_guess = iter_guess.handle().eq(&prim_call::<i64>(
-            "LoopNumItersGuess",
-            vec![
-                in_expr.handle().into_handle_ty(),
-                body.handle().into_handle_ty(),
-            ],
-        ));
+        let iter_guess = iter_guess
+            .handle()
+            .eq(&loop_num_iters_guess::query(&in_expr, &body).handle());
 
         LoopInvMotionPat::new(
             loop_expr,
@@ -1039,15 +1044,7 @@ pub(crate) mod native {
             boundary_analysis_prep,
             loop_invariant_boundary_analysis_prep_pat,
             |ctx, pat| {
-                let size = ctx._intern_base::<i64, i64>(ctx.devalue(pat.size));
-                ctx.insert_func_tbl(
-                    "to-hoist-size",
-                    &[
-                        pat.inputs.to_value(&ctx).val,
-                        pat.body.to_value(&ctx).val,
-                        size,
-                    ],
-                );
+                ctx.set_to_hoist_size(pat.inputs, pat.body, ctx.devalue(pat.size));
             },
         );
 
@@ -1056,14 +1053,7 @@ pub(crate) mod native {
             boundary_analysis,
             loop_invariant_boundary_analysis_pick_pat,
             |ctx, pat| {
-                ctx.insert_func_tbl(
-                    "to-hoist",
-                    &[
-                        pat.inputs.to_value(&ctx).val,
-                        pat.body.to_value(&ctx).val,
-                        pat.expr.to_value(&ctx).val,
-                    ],
-                );
+                ctx.set_to_hoist(pat.inputs, pat.body, pat.expr);
             },
         );
 
@@ -1080,10 +1070,7 @@ pub(crate) mod native {
                 let zero = ctx._intern_base::<i64, i64>(0);
                 let len_val = ctx.lookup_expect("tuple-length", &[pat.in_expr.to_value(&ctx).val]);
                 let len = ctx.devalue(eggplant::wrap::Value::<i64>::new(len_val));
-                let iter_guess = ctx.lookup_expect(
-                    "LoopNumItersGuess",
-                    &[pat.in_expr.to_value(&ctx).val, pat.body.to_value(&ctx).val],
-                );
+                let iter_guess = ctx.read_loop_num_iters_guess(pat.in_expr, pat.body);
 
                 let hoisted_inv = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
@@ -1146,14 +1133,7 @@ pub(crate) mod native {
                     &[pat.in_expr.to_value(&ctx).val, pat.body.to_value(&ctx).val],
                 );
                 ctx.remove("TmpCtx", &[]);
-                ctx.insert_func_tbl(
-                    "LoopNumItersGuess",
-                    &[
-                        new_input.to_value(&ctx).val,
-                        new_body.to_value(&ctx).val,
-                        iter_guess,
-                    ],
-                );
+                ctx.set_loop_num_iters_guess(new_input, new_body, iter_guess);
             },
         );
 
@@ -1499,7 +1479,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_inv {inv})\n(let __rlcr_single_inv {single_inv})\n(let __rlcr_concat_inv {concat_inv})\n(let __rlcr_empty_inv {empty_inv})"
         );
         let schedule = format!(
-            "{}\n(check (IsInvExpr __rlcr_body __rlcr_inv))\n(check (IsInvExpr __rlcr_body __rlcr_single_inv))\n(check (IsInvExpr __rlcr_body __rlcr_concat_inv))\n(check (IsInvExpr __rlcr_body __rlcr_empty_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_inv))\n",
+            "{}\n(check (IsInvExpr __rlcr_body __rlcr_inv))\n(check (IsInvExpr __rlcr_body __rlcr_single_inv))\n(check (IsInvExpr __rlcr_body __rlcr_concat_inv))\n(check (IsInvExpr __rlcr_body __rlcr_empty_inv))\n(check (= (to_hoist __rlcr_inputs __rlcr_body) __rlcr_inv))\n",
             helper_schedule()
         );
 
@@ -1542,7 +1522,7 @@ mod native_tests {
             "(let __rlcr_loop {loop_expr})\n(let __rlcr_inputs {inputs})\n(let __rlcr_body {body})\n(let __rlcr_top_inv {top_inv})"
         );
         let schedule = format!(
-            "{}\n(check (IsInvExpr __rlcr_body __rlcr_top_inv))\n(check (= (to-hoist __rlcr_inputs __rlcr_body) __rlcr_top_inv))\n",
+            "{}\n(check (IsInvExpr __rlcr_body __rlcr_top_inv))\n(check (= (to_hoist __rlcr_inputs __rlcr_body) __rlcr_top_inv))\n",
             helper_schedule()
         );
 

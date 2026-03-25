@@ -14,7 +14,7 @@ fn test_expr_size() -> crate::Result {
     .with_arg_types(emptyt(), tuplet!(intt()));
     let build: String = format!("(let loop {})", pureloop);
 
-    let check = "(check (= 10 (Expr-size loop)))";
+    let check = "(check (= 10 (expr_size loop)))";
     egglog_test(
         build.as_str(),
         check,

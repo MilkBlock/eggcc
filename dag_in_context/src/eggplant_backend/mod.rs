@@ -239,7 +239,7 @@ mod tests {
 "#;
         const FUNCTION_HAS_TYPE_RELATION: &str = "(relation FunctionHasType";
         const TERMS_MARKER: &str = "; TERMS\n";
-        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
+        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function loop_num_iters_guess";
 
         fn strip_section(program: &str, header: &str, next: &str) -> String {
             let header_start = program
@@ -1038,7 +1038,7 @@ mod tests {
     #[test]
     fn injected_terms_section_contains_migrated_constructors() {
         const TERMS_MARKER: &str = "; TERMS\n";
-        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
+        const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function loop_num_iters_guess";
         const GENERATED_MARKER: &str =
             "; (Generated from eggplant DSL: src/eggplant_backend/schema_dsl.rs)\n";
 
@@ -1049,7 +1049,7 @@ mod tests {
             + TERMS_MARKER.len();
         let terms_block_end = schema
             .find(LOOP_NUM_ITERS_GUESS_FUNCTION)
-            .expect("schema::fragment() must contain the LoopNumItersGuess function");
+            .expect("schema::fragment() must contain the loop_num_iters_guess function");
         let terms_block = &schema[terms_block_start..terms_block_end];
 
         assert!(
@@ -1882,13 +1882,13 @@ mod tests {
         );
 
         for declaration in [
-            "(function Expr-size (Expr) i64 :merge (min old new) )",
-            "(function ListExpr-size (ListExpr) i64 :merge (min old new))",
-            "(set (Expr-size expr) (+ sum 1))",
-            "(set (Expr-size expr) sum)",
-            "(set (Expr-size (Empty ty assum)) 0)",
-            "(set (ListExpr-size expr) sum)",
-            "(set (ListExpr-size (Nil)) 0)",
+            "(function expr_size (Expr) i64 :merge (min old new) )",
+            "(function list_expr_size (ListExpr) i64 :merge (min old new))",
+            "(set (expr_size expr) (+ sum 1))",
+            "(set (expr_size expr) sum)",
+            "(set (expr_size (Empty ty assum)) 0)",
+            "(set (list_expr_size expr) sum)",
+            "(set (list_expr_size (Nil)) 0)",
             "(= expr (Alloc id e state ty))",
         ] {
             assert!(
@@ -2117,7 +2117,7 @@ mod tests {
             "(ruleset select_opt)",
             "(ExprIsPure (Get thn i))",
             "(ExprIsPure (Get els i))",
-            "(> 10 (Expr-size (Get thn i)))",
+            "(> 10 (expr_size (Get thn i)))",
             "(= (TCPair t1 c1) (ExtractedExpr (Get thn i)))",
             "(= (TCPair t2 c2) (ExtractedExpr (Get els i)))",
             "(ContextOf if_e ctx)",
@@ -2351,13 +2351,13 @@ mod tests {
             ";; Loop Invariant",
             "(relation IsInvExpr (Expr Expr))",
             "(relation IsInvListExpr (Expr ListExpr))",
-            "(function to-hoist (Expr Expr) Expr :merge new)",
-            "(function to-hoist-size (Expr Expr) i64 :merge (max old new))",
+            "(function to_hoist (Expr Expr) Expr :merge new)",
+            "(function to_hoist_size (Expr Expr) i64 :merge (max old new))",
             "(ruleset boundary-analysis)",
             "(ruleset boundary-analysis-prep)",
             "(ruleset loop-inv-motion)",
-            "(set (to-hoist inputs body) expr)",
-            "(set (LoopNumItersGuess new_input new_body) iter-guess)",
+            "(set (to_hoist inputs body) expr)",
+            "(set (loop_num_iters_guess new_input new_body) iter-guess)",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -2444,11 +2444,11 @@ mod tests {
             ";; Some simple simplifications of loops",
             "(ruleset loop-unroll)",
             "(ruleset loop-iters-analysis)",
-            "(set (LoopNumItersGuess inputs outputs) 1000)",
-            "(set (LoopNumItersGuess inputs outputs) 1)",
+            "(set (loop_num_iters_guess inputs outputs) 1000)",
+            "(set (loop_num_iters_guess inputs outputs) 1)",
             "(= (% start_const 4) 0)",
             "(= (% end_constant 4) 0)",
-            "(set (LoopNumItersGuess inputs unrolled) (/ old_cost 4))",
+            "(set (loop_num_iters_guess inputs unrolled) (/ old_cost 4))",
             ":ruleset loop-unroll)",
         ] {
             assert!(
@@ -2723,7 +2723,7 @@ mod tests {
             "(relation IVTNewInputsAnalysisDemand (Expr))",
             "(ruleset ivt-analysis)",
             "(constructor IVTAnalysisRes (Expr Expr             TypeList         i64) IVTRes)",
-            "(function IVTNewInputsAnalysisImpl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))",
+            "(function ivt_new_inputs_analysis_impl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))",
             "(ruleset loop-inversion)",
             "(union final-permuted loop)",
         ] {
@@ -2989,7 +2989,7 @@ mod tests {
             "(union if_e (Subst ctx inputs thn))",
             "(union if_e (Subst ctx inputs els))",
             "((union (Get load 1) state))",
-            "(set (LoopNumItersGuess new-loop-input new-loop-body) (- old_cost 1))",
+            "(set (loop_num_iters_guess new-loop-input new-loop-body) (- old_cost 1))",
         ] {
             assert!(
                 generated_prefix.contains(declaration),
@@ -3332,7 +3332,7 @@ mod tests {
         let expr = "(Concat (Single (Const (Int 3) (Base (IntT)) (InFunc \"RLCR\"))) (Single (Const (Int 4) (Base (IntT)) (InFunc \"RLCR\"))))";
         let branches = "(Cons (Const (Int 9) (Base (IntT)) (InFunc \"RLCR\")) (Nil))";
         let program = format!(
-            "{}\n(let __rlcr_expr {expr})\n(let __rlcr_branches {branches})\n(run-schedule (saturate always-run))\n(check (= (Expr-size __rlcr_expr) 2))\n(check (= (ListExpr-size __rlcr_branches) 1))\n",
+            "{}\n(let __rlcr_expr {expr})\n(let __rlcr_branches {branches})\n(run-schedule (saturate always-run))\n(check (= (expr_size __rlcr_expr) 2))\n(check (= (list_expr_size __rlcr_branches) 1))\n",
             crate::prologue()
         );
 

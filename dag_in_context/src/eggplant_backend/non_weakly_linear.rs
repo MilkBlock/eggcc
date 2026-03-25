@@ -48,7 +48,7 @@ const NON_WEAKLY_LINEAR: &str = r#"(ruleset non-weakly-linear)
   (ContextOf lhs ctx)
   (HasType inputs inputs-ty)
   (= outputs-len (tuple-length outputs))
-  (= old_cost (LoopNumItersGuess inputs outputs))
+  (= old_cost (loop_num_iters_guess inputs outputs))
   (<= old_cost 5)
   )
  (
@@ -75,13 +75,14 @@ const NON_WEAKLY_LINEAR: &str = r#"(ruleset non-weakly-linear)
       (DoWhile new-loop-input new-loop-body)
       (Arg inputs-ty else-ctx)))
 
-  (set (LoopNumItersGuess new-loop-input new-loop-body) (- old_cost 1))
+  (set (loop_num_iters_guess new-loop-input new-loop-body) (- old_cost 1))
   )
  :ruleset non-weakly-linear)"#;
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
     use super::super::schema_dsl;
+    use crate::eggplant_backend::loop_invariant::native::loop_num_iters_guessRuleCtx;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
@@ -263,16 +264,9 @@ pub(crate) mod native {
             ruleset,
             loop_peel_pat,
             |ctx, pat| {
-                let Some(old_cost_value) = ctx.lookup(
-                    "LoopNumItersGuess",
-                    &[
-                        pat.inputs.to_value(&ctx).val,
-                        pat.outputs.to_value(&ctx).val,
-                    ],
-                ) else {
+                let Some(old_cost) = ctx.try_read_loop_num_iters_guess(pat.inputs, pat.outputs) else {
                     return;
                 };
-                let old_cost: i64 = ctx._devalue_base(old_cost_value);
                 if old_cost > 5 {
                     return;
                 }
@@ -372,14 +366,7 @@ pub(crate) mod native {
                 ));
 
                 ctx.union(pat.lhs, peeled_if);
-                ctx.insert_func_tbl(
-                    "LoopNumItersGuess",
-                    &[
-                        new_loop_input.to_value(&ctx).val,
-                        new_loop_body.to_value(&ctx).val,
-                        ctx._intern_base::<i64, i64>(old_cost - 1),
-                    ],
-                );
+                ctx.set_loop_num_iters_guess(new_loop_input, new_loop_body, old_cost - 1);
                 ctx.remove("TmpCtx", &[]);
             },
         );

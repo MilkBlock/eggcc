@@ -37,9 +37,9 @@ const IVT_SUPPORT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 
 ;; use an analysis to avoid exploring all combinations of passthrough vs not passed through values. Always prefer not passed through
 ;;                                  expr1 curr  if  result
-(function IVTNewInputsAnalysisImpl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))
+(function ivt_new_inputs_analysis_impl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))
 
-;; IVTNewInputsAnalysis computes a permutation perm which corresponds to accessing elements of an if region.
+;; ivt_new_inputs_analysis computes a permutation perm which corresponds to accessing elements of an if region.
 ;; It also makes accesses of passthrough arguments access new indices after the length of the if region.
 ;; For example, if expr1 is: [get(if, 1), get(arg, 1), get(if, 0), get(arg, 3)]
 ;; It produces a new permutation: [get(arg, 1), get(arg, 2), get(arg, 0), get(arg, 3)]
@@ -47,7 +47,7 @@ const IVT_SUPPORT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 ;; This new permutation is intended to be used with a substitution argument (Concat if-statement passthrough-args)
 ;; Also produced is a passthrough-perm, which selects all of the passthrough arguments and puts them in a single tuple
 ;;                              expr1 if result
-(function IVTNewInputsAnalysis (Expr  Node) IVTRes :merge (IVTMin old new))
+(function ivt_new_inputs_analysis (Expr  Node) IVTRes :merge (IVTMin old new))
 
 (ruleset loop-inversion)"#;
 const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
@@ -71,9 +71,9 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 
 ;; use an analysis to avoid exploring all combinations of passthrough vs not passed through values. Always prefer not passed through
 ;;                                  expr1 curr  if  result
-(function IVTNewInputsAnalysisImpl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))
+(function ivt_new_inputs_analysis_impl (Expr  Expr  Node) IVTRes :merge (IVTMin old new))
 
-;; IVTNewInputsAnalysis computes a permutation perm which corresponds to accessing elements of an if region.
+;; ivt_new_inputs_analysis computes a permutation perm which corresponds to accessing elements of an if region.
 ;; It also makes accesses of passthrough arguments access new indices after the length of the if region.
 ;; For example, if expr1 is: [get(if, 1), get(arg, 1), get(if, 0), get(arg, 3)]
 ;; It produces a new permutation: [get(arg, 1), get(arg, 2), get(arg, 0), get(arg, 3)]
@@ -81,7 +81,7 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 ;; This new permutation is intended to be used with a substitution argument (Concat if-statement passthrough-args)
 ;; Also produced is a passthrough-perm, which selects all of the passthrough arguments and puts them in a single tuple
 ;;                              expr1 if result
-(function IVTNewInputsAnalysis (Expr  Node) IVTRes :merge (IVTMin old new))
+(function ivt_new_inputs_analysis (Expr  Node) IVTRes :merge (IVTMin old new))
 
 
 (rule (
@@ -101,24 +101,24 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 ) (
     (let perm (Empty (TmpType) (InFunc "no-ctx")))
     (set
-     (IVTNewInputsAnalysisImpl loop-body rest (IfNode if-eclass pred inputs thn else))
+     (ivt_new_inputs_analysis_impl loop-body rest (IfNode if-eclass pred inputs thn else))
      (IVTAnalysisRes perm perm (TNil) 0))
 ) :ruleset ivt-analysis)
 
 ;; recursive case for accessing the if statement
 (rule (
-    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= (ivt_new_inputs_analysis_impl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
     (= ifnode (IfNode if-eclass pred inputs then else))
     (= curr (Concat (Single (Get if-eclass ith)) rest))
 ) (
     (let new-perm (Concat perm (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith))))
-    (set (IVTNewInputsAnalysisImpl loop-body rest ifnode)
+    (set (ivt_new_inputs_analysis_impl loop-body rest ifnode)
          (IVTAnalysisRes new-perm  pperm passthrough-tys len))
 ) :ruleset ivt-analysis)
 
 ;; recursive case for accessing a passed-through argument
 (rule (
-    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= (ivt_new_inputs_analysis_impl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
     (= ifnode (IfNode if-eclass pred inputs then else))
     (= curr (Concat (Single (Get (Arg ty ctx) ith)) rest))
     (= (Get loop-body (+ ith 1)) (Get curr 0))
@@ -130,23 +130,23 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
     (let original-get-index (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith)))
     (let new-pperm (Concat pperm original-get-index))
     (let new-passthrough-tys (TLConcat passthrough-tys (TCons new-ty (TNil))))
-    (set (IVTNewInputsAnalysisImpl loop-body rest ifnode)
+    (set (ivt_new_inputs_analysis_impl loop-body rest ifnode)
          (IVTAnalysisRes new-perm new-pperm new-passthrough-tys (+ len 1)))
 ) :ruleset ivt-analysis)
 
 ; base case for accessing if statement
 (rule (
-    (= (IVTNewInputsAnalysisImpl loop-body (Single last) ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= (ivt_new_inputs_analysis_impl loop-body (Single last) ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
     (= ifnode (IfNode if-eclass pred inputs then else))
     (= last (Get if-eclass ith))
 ) (
     (let new-perm (Concat perm (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith))))
-    (set (IVTNewInputsAnalysis loop-body ifnode) (IVTAnalysisRes new-perm pperm passthrough-tys len))
+    (set (ivt_new_inputs_analysis loop-body ifnode) (IVTAnalysisRes new-perm pperm passthrough-tys len))
 ) :ruleset ivt-analysis)
 
 ; base case for accessing a passed-through argument
 (rule (
-    (= (IVTNewInputsAnalysisImpl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
+    (= (ivt_new_inputs_analysis_impl loop-body curr ifnode) (IVTAnalysisRes perm pperm passthrough-tys len))
     (= ifnode (IfNode if-eclass pred inputs then else))
     (= curr (Single (Get (Arg ty ctx) ith)))
     (= (Get loop-body (+ ith 1)) (Get curr 0))
@@ -158,7 +158,7 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
     (let original-get-index (Single (Get (Arg (TmpType) (InFunc "no-ctx")) ith)))
     (let new-pperm (Concat pperm original-get-index))
     (let new-passthrough-tys (TLConcat passthrough-tys (TCons new-ty (TNil))))
-    (set (IVTNewInputsAnalysis loop-body ifnode) (IVTAnalysisRes new-perm new-pperm new-passthrough-tys (+ len 1)))
+    (set (ivt_new_inputs_analysis loop-body ifnode) (IVTAnalysisRes new-perm new-pperm new-passthrough-tys (+ len 1)))
 ) :ruleset ivt-analysis)
 
 
@@ -166,7 +166,7 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 
 (rule (
     (= loop (DoWhile inpW outW))
-    (= (IVTNewInputsAnalysis outW ifnode) (IVTAnalysisRes perm pperm passthrough-tys _len))
+    (= (ivt_new_inputs_analysis outW ifnode) (IVTAnalysisRes perm pperm passthrough-tys _len))
     (= ifnode (IfNode if if-cond if-inputs then else))
     (= if-inputs-len (tuple-length if-inputs))
     (= passthrough-len (TypeList-length passthrough-tys))
@@ -239,33 +239,29 @@ const IVT: &str = r#"(relation IVTNewInputsAnalysisDemand (Expr))
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
+    #![allow(non_camel_case_types)]
+
     use super::super::schema_dsl;
-    use super::super::schema_dsl::IVTNewInputsAnalysisDemandPRRuleCtx;
+    use super::super::schema_dsl::{
+        Expr, IVTNewInputsAnalysisDemandPRRuleCtx, IVTRes, IVTResPRRuleCtx, Node, NodePRRuleCtx,
+    };
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
         prim_call, AsHandle, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl,
         RuleSetId,
     };
-    use eggplant::wrap::EgglogTy;
 
-    #[derive(Clone, Copy, Debug)]
-    struct IVTResTy;
-
-    impl EgglogTy for IVTResTy {
-        const TY_NAME: &'static str = "IVTRes";
-        const TY_NAME_LOWER: &'static str = "ivt_res";
-        type Valued = eggplant::wrap::Value<Self>;
-        type EnumVariantMarker = ();
+    #[eggplant::func(output = IVTRes, merge = "(IVTMin old new)")]
+    struct ivt_new_inputs_analysis_impl {
+        loop_body: Expr,
+        curr: Expr,
+        ifnode: Node,
     }
 
-    #[derive(Clone, Copy, Debug)]
-    struct NodeTy;
-
-    impl EgglogTy for NodeTy {
-        const TY_NAME: &'static str = "Node";
-        const TY_NAME_LOWER: &'static str = "node";
-        type Valued = eggplant::wrap::Value<Self>;
-        type EnumVariantMarker = ();
+    #[eggplant::func(output = IVTRes, merge = "(IVTMin old new)")]
+    struct ivt_new_inputs_analysis {
+        loop_body: Expr,
+        ifnode: Node,
     }
 
     #[eggplant::pat_vars]
@@ -360,33 +356,13 @@ pub(crate) mod native {
         let if_get = schema_dsl::Get::query(&if_eclass);
         let single_if_get = schema_dsl::Single::query(&if_get);
         let curr = schema_dsl::Concat::query(&single_if_get, &rest);
-        let analysis_matches = prim_call::<IVTResTy>(
-            "IVTAnalysisRes",
-            vec![
-                perm.handle().into_handle_ty(),
-                pperm.handle().into_handle_ty(),
-                passthrough_tys.handle().into_handle_ty(),
-                len.handle().into_handle_ty(),
-            ],
-        )
-        .eq(&prim_call::<IVTResTy>(
-            "IVTNewInputsAnalysisImpl",
-            vec![
-                loop_body.handle().into_handle_ty(),
-                curr.handle().into_handle_ty(),
-                prim_call::<NodeTy>(
-                    "IfNode",
-                    vec![
-                        if_eclass.handle().into_handle_ty(),
-                        pred.handle().into_handle_ty(),
-                        inputs.handle().into_handle_ty(),
-                        then_branch.handle().into_handle_ty(),
-                        else_branch.handle().into_handle_ty(),
-                    ],
-                )
-                .into_handle_ty(),
-            ],
-        ));
+        let ifnode =
+            schema_dsl::IfNode::query(&if_eclass, &pred, &inputs, &then_branch, &else_branch);
+        let analysis = schema_dsl::IVTAnalysisRes::query(&perm, &pperm, &passthrough_tys);
+        let analysis_matches = analysis
+            .handle()
+            .eq(&ivt_new_inputs_analysis_impl::query(&loop_body, &curr, &ifnode).handle());
+        let len_matches = analysis.handle_len().eq(&len.handle());
 
         IvtRecurseIfAccessPat::new(
             loop_body,
@@ -403,6 +379,7 @@ pub(crate) mod native {
             if_get,
         )
         .assert(analysis_matches)
+        .assert(len_matches)
     }
 
     #[eggplant::pat_vars]
@@ -450,33 +427,13 @@ pub(crate) mod native {
         let shifted_index = loop_get
             .handle_index()
             .eq(&(arg_get.handle_index() + (&1_i64).as_handle()));
-        let analysis_res = prim_call::<IVTResTy>(
-            "IVTAnalysisRes",
-            vec![
-                perm.handle().into_handle_ty(),
-                pperm.handle().into_handle_ty(),
-                passthrough_tys.handle().into_handle_ty(),
-                len.handle().into_handle_ty(),
-            ],
-        );
-        let if_node = prim_call::<NodeTy>(
-            "IfNode",
-            vec![
-                if_eclass.handle().into_handle_ty(),
-                pred.handle().into_handle_ty(),
-                inputs.handle().into_handle_ty(),
-                then_branch.handle().into_handle_ty(),
-                else_branch.handle().into_handle_ty(),
-            ],
-        );
-        let analysis_matches = analysis_res.eq(&prim_call::<IVTResTy>(
-            "IVTNewInputsAnalysisImpl",
-            vec![
-                loop_body.handle().into_handle_ty(),
-                curr.handle().into_handle_ty(),
-                if_node.into_handle_ty(),
-            ],
-        ));
+        let ifnode =
+            schema_dsl::IfNode::query(&if_eclass, &pred, &inputs, &then_branch, &else_branch);
+        let analysis = schema_dsl::IVTAnalysisRes::query(&perm, &pperm, &passthrough_tys);
+        let analysis_matches = analysis
+            .handle()
+            .eq(&ivt_new_inputs_analysis_impl::query(&loop_body, &curr, &ifnode).handle());
+        let len_matches = analysis.handle_len().eq(&len.handle());
         let if_len_known = if_len.handle().eq(&prim_call::<i64>(
             "tuple-length",
             vec![if_eclass.handle().into_handle_ty()],
@@ -500,6 +457,7 @@ pub(crate) mod native {
             new_ty,
         )
         .assert(analysis_matches)
+        .assert(len_matches)
         .assert(if_len_known)
         .assert(loop_matches_arg)
         .assert(shifted_index)
@@ -533,33 +491,13 @@ pub(crate) mod native {
         let len = BaseVar::<i64, PR>::query_named("ivt_len");
         let last = schema_dsl::Get::query(&if_eclass);
         let curr = schema_dsl::Single::query(&last);
-        let analysis_matches = prim_call::<IVTResTy>(
-            "IVTAnalysisRes",
-            vec![
-                perm.handle().into_handle_ty(),
-                pperm.handle().into_handle_ty(),
-                passthrough_tys.handle().into_handle_ty(),
-                len.handle().into_handle_ty(),
-            ],
-        )
-        .eq(&prim_call::<IVTResTy>(
-            "IVTNewInputsAnalysisImpl",
-            vec![
-                loop_body.handle().into_handle_ty(),
-                curr.handle().into_handle_ty(),
-                prim_call::<NodeTy>(
-                    "IfNode",
-                    vec![
-                        if_eclass.handle().into_handle_ty(),
-                        pred.handle().into_handle_ty(),
-                        inputs.handle().into_handle_ty(),
-                        then_branch.handle().into_handle_ty(),
-                        else_branch.handle().into_handle_ty(),
-                    ],
-                )
-                .into_handle_ty(),
-            ],
-        ));
+        let ifnode =
+            schema_dsl::IfNode::query(&if_eclass, &pred, &inputs, &then_branch, &else_branch);
+        let analysis = schema_dsl::IVTAnalysisRes::query(&perm, &pperm, &passthrough_tys);
+        let analysis_matches = analysis
+            .handle()
+            .eq(&ivt_new_inputs_analysis_impl::query(&loop_body, &curr, &ifnode).handle());
+        let len_matches = analysis.handle_len().eq(&len.handle());
 
         IvtFinishIfAccessPat::new(
             loop_body,
@@ -575,6 +513,7 @@ pub(crate) mod native {
             last,
         )
         .assert(analysis_matches)
+        .assert(len_matches)
     }
 
     #[eggplant::pat_vars]
@@ -619,33 +558,13 @@ pub(crate) mod native {
         let shifted_index = loop_get
             .handle_index()
             .eq(&(arg_get.handle_index() + (&1_i64).as_handle()));
-        let analysis_matches = prim_call::<IVTResTy>(
-            "IVTAnalysisRes",
-            vec![
-                perm.handle().into_handle_ty(),
-                pperm.handle().into_handle_ty(),
-                passthrough_tys.handle().into_handle_ty(),
-                len.handle().into_handle_ty(),
-            ],
-        )
-        .eq(&prim_call::<IVTResTy>(
-            "IVTNewInputsAnalysisImpl",
-            vec![
-                loop_body.handle().into_handle_ty(),
-                curr.handle().into_handle_ty(),
-                prim_call::<NodeTy>(
-                    "IfNode",
-                    vec![
-                        if_eclass.handle().into_handle_ty(),
-                        pred.handle().into_handle_ty(),
-                        inputs.handle().into_handle_ty(),
-                        then_branch.handle().into_handle_ty(),
-                        else_branch.handle().into_handle_ty(),
-                    ],
-                )
-                .into_handle_ty(),
-            ],
-        ));
+        let ifnode =
+            schema_dsl::IfNode::query(&if_eclass, &pred, &inputs, &then_branch, &else_branch);
+        let analysis = schema_dsl::IVTAnalysisRes::query(&perm, &pperm, &passthrough_tys);
+        let analysis_matches = analysis
+            .handle()
+            .eq(&ivt_new_inputs_analysis_impl::query(&loop_body, &curr, &ifnode).handle());
+        let len_matches = analysis.handle_len().eq(&len.handle());
         let if_len_known = if_len.handle().eq(&prim_call::<i64>(
             "tuple-length",
             vec![if_eclass.handle().into_handle_ty()],
@@ -668,6 +587,7 @@ pub(crate) mod native {
             new_ty,
         )
         .assert(analysis_matches)
+        .assert(len_matches)
         .assert(if_len_known)
         .assert(loop_matches_arg)
         .assert(shifted_index)
@@ -713,33 +633,13 @@ pub(crate) mod native {
         let if_context = schema_dsl::ContextOf::query_fields(&if_inputs, &if_ctx);
         let if_inputs_have_type = schema_dsl::HasType::query_fields(&if_inputs, &inputs_ty);
         let len = BaseVar::<i64, PR>::query_named("_len");
-        let ifnode = BaseVar::<NodeTy, PR>::query_named("ifnode");
-        let analysis_matches = prim_call::<IVTResTy>(
-            "IVTAnalysisRes",
-            vec![
-                perm.handle().into_handle_ty(),
-                pperm.handle().into_handle_ty(),
-                passthrough_tys.handle().into_handle_ty(),
-                len.handle().into_handle_ty(),
-            ],
-        )
-        .eq(&prim_call::<IVTResTy>(
-            "IVTNewInputsAnalysis",
-            vec![
-                out_w.handle().into_handle_ty(),
-                ifnode.handle().into_handle_ty(),
-            ],
-        ));
-        let ifnode_matches = ifnode.handle().eq(&prim_call::<NodeTy>(
-            "IfNode",
-            vec![
-                if_expr.handle().into_handle_ty(),
-                if_cond.handle().into_handle_ty(),
-                if_inputs.handle().into_handle_ty(),
-                then_branch.handle().into_handle_ty(),
-                else_branch.handle().into_handle_ty(),
-            ],
-        ));
+        let ifnode =
+            schema_dsl::IfNode::query(&if_expr, &if_cond, &if_inputs, &then_branch, &else_branch);
+        let analysis = schema_dsl::IVTAnalysisRes::query(&perm, &pperm, &passthrough_tys);
+        let analysis_matches = analysis
+            .handle()
+            .eq(&ivt_new_inputs_analysis::query(&out_w, &ifnode).handle());
+        let len_matches = analysis.handle_len().eq(&len.handle());
 
         LoopInversionPat::new(
             loop_expr,
@@ -760,7 +660,7 @@ pub(crate) mod native {
             if_inputs_have_type,
         )
         .assert(analysis_matches)
-        .assert(ifnode_matches)
+        .assert(len_matches)
     }
 
     pub(crate) fn register_native_support_rules() -> RuleSetId {
@@ -781,34 +681,26 @@ pub(crate) mod native {
             ivt_seed_pat,
             |ctx, pat| {
                 let no_ctx_name = ctx.intern_base::<String, _>("no-ctx".to_owned());
-                let tmp_type = eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
-                let no_ctx =
-                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("InFunc", &[no_ctx_name.val]));
-                let perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Empty", &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val]));
-                let tnil = eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
-                let ifnode = eggplant::wrap::Value::<NodeTy>::new((&ctx).insert("IfNode", &[
-                        pat.if_eclass.to_value(&ctx).val,
-                        pat.pred.to_value(&ctx).val,
-                        pat.inputs.to_value(&ctx).val,
-                        pat.then_branch.to_value(&ctx).val,
-                        pat.else_branch.to_value(&ctx).val,
-                    ]));
-                let zero = ctx._intern_base::<i64, i64>(0);
-                let res = eggplant::wrap::Value::<IVTResTy>::new((&ctx).insert("IVTAnalysisRes", &[
-                        perm.to_value(&ctx).val,
-                        perm.to_value(&ctx).val,
-                        tnil.to_value(&ctx).val,
-                        zero,
-                    ]));
-                ctx.insert_func_tbl(
-                    "IVTNewInputsAnalysisImpl",
-                    &[
-                        pat.loop_body.to_value(&ctx).val,
-                        pat.rest.to_value(&ctx).val,
-                        ifnode.val,
-                        res.val,
-                    ],
+                let tmp_type =
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
+                let no_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("InFunc", &[no_ctx_name.val]),
                 );
+                let perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Empty",
+                    &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
+                ));
+                let tnil =
+                    eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
+                let ifnode = ctx.insert_if_node(
+                    pat.if_eclass,
+                    pat.pred,
+                    pat.inputs,
+                    pat.then_branch,
+                    pat.else_branch,
+                );
+                let res = ctx.insert_ivt_analysis_res(perm, perm, tnil, 0_i64);
+                ctx.set_ivt_new_inputs_analysis_impl(pat.loop_body, pat.rest, ifnode, res);
             },
         );
 
@@ -818,41 +710,52 @@ pub(crate) mod native {
             ivt_recurse_if_access_pat,
             |ctx, pat| {
                 let no_ctx_name = ctx.intern_base::<String, _>("no-ctx".to_owned());
-                let tmp_type = eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
-                let no_ctx =
-                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("InFunc", &[no_ctx_name.val]));
-                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val]));
-                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                        pat.perm.to_value(&ctx).val,
-                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, pat.if_get.index.val]))
-                            .to_value(&ctx)
-                            .val]))
-                        .to_value(&ctx)
-                        .val,
-                    ]));
-                let ifnode = eggplant::wrap::Value::<NodeTy>::new((&ctx).insert("IfNode", &[
-                        pat.if_eclass.to_value(&ctx).val,
-                        pat.pred.to_value(&ctx).val,
-                        pat.inputs.to_value(&ctx).val,
-                        pat.then_branch.to_value(&ctx).val,
-                        pat.else_branch.to_value(&ctx).val,
-                    ]));
-                let len = ctx._intern_base::<i64, i64>(ctx.devalue(pat.len));
-                let res = eggplant::wrap::Value::<IVTResTy>::new((&ctx).insert("IVTAnalysisRes", &[
-                        new_perm.to_value(&ctx).val,
-                        pat.pperm.to_value(&ctx).val,
-                        pat.passthrough_tys.to_value(&ctx).val,
-                        len,
-                    ]));
-                ctx.insert_func_tbl(
-                    "IVTNewInputsAnalysisImpl",
-                    &[
-                        pat.loop_body.to_value(&ctx).val,
-                        pat.rest.to_value(&ctx).val,
-                        ifnode.val,
-                        res.val,
-                    ],
+                let tmp_type =
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
+                let no_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("InFunc", &[no_ctx_name.val]),
                 );
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Arg",
+                    &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
+                ));
+                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Concat",
+                        &[
+                            pat.perm.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                (&ctx).insert(
+                                    "Single",
+                                    &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                        (&ctx).insert(
+                                            "Get",
+                                            &[tmp_arg.to_value(&ctx).val, pat.if_get.index.val],
+                                        ),
+                                    )
+                                    .to_value(&ctx)
+                                    .val],
+                                ),
+                            )
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
+                );
+                let ifnode = ctx.insert_if_node(
+                    pat.if_eclass,
+                    pat.pred,
+                    pat.inputs,
+                    pat.then_branch,
+                    pat.else_branch,
+                );
+                let res = ctx.insert_ivt_analysis_res(
+                    new_perm,
+                    pat.pperm,
+                    pat.passthrough_tys,
+                    ctx.devalue(pat.len),
+                );
+                ctx.set_ivt_new_inputs_analysis_impl(pat.loop_body, pat.rest, ifnode, res);
             },
         );
 
@@ -862,58 +765,86 @@ pub(crate) mod native {
             ivt_recurse_passthrough_pat,
             |ctx, pat| {
                 let no_ctx_name = ctx.intern_base::<String, _>("no-ctx".to_owned());
-                let tmp_type = eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
-                let no_ctx =
-                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("InFunc", &[no_ctx_name.val]));
-                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val]));
+                let tmp_type =
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
+                let no_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("InFunc", &[no_ctx_name.val]),
+                );
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Arg",
+                    &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
+                ));
                 let len = ctx.devalue(pat.len);
                 let if_len = ctx.devalue(pat.if_len);
-                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[
-                            tmp_arg.to_value(&ctx).val,
-                            ctx._intern_base::<i64, i64>(if_len + len),
-                        ]))
-                    .to_value(&ctx)
-                    .val]));
-                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Single",
+                        &[
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                                "Get",
+                                &[
+                                    tmp_arg.to_value(&ctx).val,
+                                    ctx._intern_base::<i64, i64>(if_len + len),
+                                ],
+                            ))
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
+                );
+                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Concat",
+                    &[
                         pat.perm.to_value(&ctx).val,
                         get_passed_through.to_value(&ctx).val,
-                    ]));
-                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val]))
-                    .to_value(&ctx)
-                    .val]));
-                let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                    ],
+                ));
+                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Single",
+                        &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                            (&ctx).insert(
+                                "Get",
+                                &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val],
+                            ),
+                        )
+                        .to_value(&ctx)
+                        .val],
+                    ),
+                );
+                let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Concat",
+                    &[
                         pat.pperm.to_value(&ctx).val,
                         original_get_index.to_value(&ctx).val,
-                    ]));
-                let tnil = eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
-                let new_passthrough_tys = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TLConcat", &[
-                        pat.passthrough_tys.to_value(&ctx).val,
-                        eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TCons", &[pat.new_ty.to_value(&ctx).val, tnil.to_value(&ctx).val]))
-                        .to_value(&ctx)
-                        .val,
-                    ]));
-                let ifnode = eggplant::wrap::Value::<NodeTy>::new((&ctx).insert("IfNode", &[
-                        pat.if_eclass.to_value(&ctx).val,
-                        pat.pred.to_value(&ctx).val,
-                        pat.inputs.to_value(&ctx).val,
-                        pat.then_branch.to_value(&ctx).val,
-                        pat.else_branch.to_value(&ctx).val,
-                    ]));
-                let res = eggplant::wrap::Value::<IVTResTy>::new((&ctx).insert("IVTAnalysisRes", &[
-                        new_perm.to_value(&ctx).val,
-                        new_pperm.to_value(&ctx).val,
-                        new_passthrough_tys.to_value(&ctx).val,
-                        ctx._intern_base::<i64, i64>(len + 1),
-                    ]));
-                ctx.insert_func_tbl(
-                    "IVTNewInputsAnalysisImpl",
-                    &[
-                        pat.loop_body.to_value(&ctx).val,
-                        pat.rest.to_value(&ctx).val,
-                        ifnode.val,
-                        res.val,
                     ],
+                ));
+                let tnil =
+                    eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
+                let new_passthrough_tys = eggplant::wrap::Value::<schema_dsl::TypeList>::new(
+                    (&ctx).insert(
+                        "TLConcat",
+                        &[
+                            pat.passthrough_tys.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert(
+                                "TCons",
+                                &[pat.new_ty.to_value(&ctx).val, tnil.to_value(&ctx).val],
+                            ))
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
                 );
+                let ifnode = ctx.insert_if_node(
+                    pat.if_eclass,
+                    pat.pred,
+                    pat.inputs,
+                    pat.then_branch,
+                    pat.else_branch,
+                );
+                let res =
+                    ctx.insert_ivt_analysis_res(new_perm, new_pperm, new_passthrough_tys, len + 1);
+                ctx.set_ivt_new_inputs_analysis_impl(pat.loop_body, pat.rest, ifnode, res);
             },
         );
 
@@ -923,40 +854,52 @@ pub(crate) mod native {
             ivt_finish_if_access_pat,
             |ctx, pat| {
                 let no_ctx_name = ctx.intern_base::<String, _>("no-ctx".to_owned());
-                let tmp_type = eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
-                let no_ctx =
-                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("InFunc", &[no_ctx_name.val]));
-                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val]));
-                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                        pat.perm.to_value(&ctx).val,
-                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, pat.last.index.val]))
-                            .to_value(&ctx)
-                            .val]))
-                        .to_value(&ctx)
-                        .val,
-                    ]));
-                let ifnode = eggplant::wrap::Value::<NodeTy>::new((&ctx).insert("IfNode", &[
-                        pat.if_eclass.to_value(&ctx).val,
-                        pat.pred.to_value(&ctx).val,
-                        pat.inputs.to_value(&ctx).val,
-                        pat.then_branch.to_value(&ctx).val,
-                        pat.else_branch.to_value(&ctx).val,
-                    ]));
-                let len = ctx._intern_base::<i64, i64>(ctx.devalue(pat.len));
-                let res = eggplant::wrap::Value::<IVTResTy>::new((&ctx).insert("IVTAnalysisRes", &[
-                        new_perm.to_value(&ctx).val,
-                        pat.pperm.to_value(&ctx).val,
-                        pat.passthrough_tys.to_value(&ctx).val,
-                        len,
-                    ]));
-                ctx.insert_func_tbl(
-                    "IVTNewInputsAnalysis",
-                    &[
-                        pat.loop_body.to_value(&ctx).val,
-                        ifnode.val,
-                        res.val,
-                    ],
+                let tmp_type =
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
+                let no_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("InFunc", &[no_ctx_name.val]),
                 );
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Arg",
+                    &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
+                ));
+                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Concat",
+                        &[
+                            pat.perm.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                (&ctx).insert(
+                                    "Single",
+                                    &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                                        (&ctx).insert(
+                                            "Get",
+                                            &[tmp_arg.to_value(&ctx).val, pat.last.index.val],
+                                        ),
+                                    )
+                                    .to_value(&ctx)
+                                    .val],
+                                ),
+                            )
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
+                );
+                let ifnode = ctx.insert_if_node(
+                    pat.if_eclass,
+                    pat.pred,
+                    pat.inputs,
+                    pat.then_branch,
+                    pat.else_branch,
+                );
+                let res = ctx.insert_ivt_analysis_res(
+                    new_perm,
+                    pat.pperm,
+                    pat.passthrough_tys,
+                    ctx.devalue(pat.len),
+                );
+                ctx.set_ivt_new_inputs_analysis(pat.loop_body, ifnode, res);
             },
         );
 
@@ -966,57 +909,86 @@ pub(crate) mod native {
             ivt_finish_passthrough_pat,
             |ctx, pat| {
                 let no_ctx_name = ctx.intern_base::<String, _>("no-ctx".to_owned());
-                let tmp_type = eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
-                let no_ctx =
-                    eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("InFunc", &[no_ctx_name.val]));
-                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val]));
+                let tmp_type =
+                    eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TmpType", &[]));
+                let no_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new(
+                    (ctx).insert("InFunc", &[no_ctx_name.val]),
+                );
+                let tmp_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Arg",
+                    &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
+                ));
                 let len = ctx.devalue(pat.len);
                 let if_len = ctx.devalue(pat.if_len);
-                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[
-                            tmp_arg.to_value(&ctx).val,
-                            ctx._intern_base::<i64, i64>(if_len + len),
-                        ]))
-                    .to_value(&ctx)
-                    .val]));
-                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Single",
+                        &[
+                            eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                                "Get",
+                                &[
+                                    tmp_arg.to_value(&ctx).val,
+                                    ctx._intern_base::<i64, i64>(if_len + len),
+                                ],
+                            ))
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
+                );
+                let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Concat",
+                    &[
                         pat.perm.to_value(&ctx).val,
                         get_passed_through.to_value(&ctx).val,
-                    ]));
-                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val]))
-                    .to_value(&ctx)
-                    .val]));
-                let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                    ],
+                ));
+                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                    (&ctx).insert(
+                        "Single",
+                        &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                            (&ctx).insert(
+                                "Get",
+                                &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val],
+                            ),
+                        )
+                        .to_value(&ctx)
+                        .val],
+                    ),
+                );
+                let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Concat",
+                    &[
                         pat.pperm.to_value(&ctx).val,
                         original_get_index.to_value(&ctx).val,
-                    ]));
-                let tnil = eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
-                let new_passthrough_tys = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TLConcat", &[
-                        pat.passthrough_tys.to_value(&ctx).val,
-                        eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TCons", &[pat.new_ty.to_value(&ctx).val, tnil.to_value(&ctx).val]))
-                        .to_value(&ctx)
-                        .val,
-                    ]));
-                let ifnode = eggplant::wrap::Value::<NodeTy>::new((&ctx).insert("IfNode", &[
-                        pat.if_eclass.to_value(&ctx).val,
-                        pat.pred.to_value(&ctx).val,
-                        pat.inputs.to_value(&ctx).val,
-                        pat.then_branch.to_value(&ctx).val,
-                        pat.else_branch.to_value(&ctx).val,
-                    ]));
-                let res = eggplant::wrap::Value::<IVTResTy>::new((&ctx).insert("IVTAnalysisRes", &[
-                        new_perm.to_value(&ctx).val,
-                        new_pperm.to_value(&ctx).val,
-                        new_passthrough_tys.to_value(&ctx).val,
-                        ctx._intern_base::<i64, i64>(len + 1),
-                    ]));
-                ctx.insert_func_tbl(
-                    "IVTNewInputsAnalysis",
-                    &[
-                        pat.loop_body.to_value(&ctx).val,
-                        ifnode.val,
-                        res.val,
                     ],
+                ));
+                let tnil =
+                    eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
+                let new_passthrough_tys = eggplant::wrap::Value::<schema_dsl::TypeList>::new(
+                    (&ctx).insert(
+                        "TLConcat",
+                        &[
+                            pat.passthrough_tys.to_value(&ctx).val,
+                            eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert(
+                                "TCons",
+                                &[pat.new_ty.to_value(&ctx).val, tnil.to_value(&ctx).val],
+                            ))
+                            .to_value(&ctx)
+                            .val,
+                        ],
+                    ),
                 );
+                let ifnode = ctx.insert_if_node(
+                    pat.if_eclass,
+                    pat.pred,
+                    pat.inputs,
+                    pat.then_branch,
+                    pat.else_branch,
+                );
+                let res =
+                    ctx.insert_ivt_analysis_res(new_perm, new_pperm, new_passthrough_tys, len + 1);
+                ctx.set_ivt_new_inputs_analysis(pat.loop_body, ifnode, res);
             },
         );
 
@@ -1033,132 +1005,230 @@ pub(crate) mod native {
             let passthrough_len =
                 ctx.lookup_expect("TypeList-length", &[pat.passthrough_tys.to_value(&ctx).val]);
 
-            let new_if_cond = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+            let new_if_cond = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     pat.outer_ctx.to_value(&ctx).val,
                     pat.inp_w.to_value(&ctx).val,
                     pat.if_cond.to_value(&ctx).val,
-                ]));
-            let subst_if_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                ],
+            ));
+            let subst_if_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     pat.outer_ctx.to_value(&ctx).val,
                     pat.inp_w.to_value(&ctx).val,
                     pat.if_inputs.to_value(&ctx).val,
-                ]));
-            let subst_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                ],
+            ));
+            let subst_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     pat.outer_ctx.to_value(&ctx).val,
                     pat.inp_w.to_value(&ctx).val,
                     pat.pperm.to_value(&ctx).val,
-                ]));
-            let new_if_inp = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
+                ],
+            ));
+            let new_if_inp = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Concat",
+                &[
                     subst_if_inputs.to_value(&ctx).val,
                     subst_pperm.to_value(&ctx).val,
-                ]));
-            let new_if_true_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InIf", &[
-                    true.to_value(&ctx).val,
-                    new_if_cond.to_value(&ctx).val,
-                    new_if_inp.to_value(&ctx).val,
-                ]));
-            let new_if_false_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InIf", &[
-                    false.to_value(&ctx).val,
-                    new_if_cond.to_value(&ctx).val,
-                    new_if_inp.to_value(&ctx).val,
-                ]));
+                ],
+            ));
+            let new_if_true_ctx =
+                eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
+                    "InIf",
+                    &[
+                        true.to_value(&ctx).val,
+                        new_if_cond.to_value(&ctx).val,
+                        new_if_inp.to_value(&ctx).val,
+                    ],
+                ));
+            let new_if_false_ctx =
+                eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
+                    "InIf",
+                    &[
+                        false.to_value(&ctx).val,
+                        new_if_cond.to_value(&ctx).val,
+                        new_if_inp.to_value(&ctx).val,
+                    ],
+                ));
 
-            let new_ty_list = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert("TLConcat", &[
+            let new_ty_list = eggplant::wrap::Value::<schema_dsl::TypeList>::new((&ctx).insert(
+                "TLConcat",
+                &[
                     pat.inputs_ty_list.to_value(&ctx).val,
                     pat.passthrough_tys.to_value(&ctx).val,
-                ]));
-            let new_loop_arg_ty =
-                eggplant::wrap::Value::<schema_dsl::Type>::new((ctx).insert("TupleT", &[new_ty_list.val]));
-            let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("TmpCtx", &[]));
-            let new_loop_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[
+                ],
+            ));
+            let new_loop_arg_ty = eggplant::wrap::Value::<schema_dsl::Type>::new(
+                (ctx).insert("TupleT", &[new_ty_list.val]),
+            );
+            let tmp_ctx =
+                eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("TmpCtx", &[]));
+            let new_loop_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Arg",
+                &[
                     new_loop_arg_ty.to_value(&ctx).val,
                     tmp_ctx.to_value(&ctx).val,
-                ]));
-            let then_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[new_loop_arg.to_value(&ctx).val, zero, if_inputs_len]));
-            let new_then_branch = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                ],
+            ));
+            let then_arg = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "SubTuple",
+                &[new_loop_arg.to_value(&ctx).val, zero, if_inputs_len],
+            ));
+            let new_then_branch = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     tmp_ctx.to_value(&ctx).val,
                     then_arg.to_value(&ctx).val,
                     pat.then_branch.to_value(&ctx).val,
-                ]));
-            let passthrough_suffix = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[
+                ],
+            ));
+            let passthrough_suffix = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "SubTuple",
+                &[
                     new_loop_arg.to_value(&ctx).val,
                     if_inputs_len,
                     passthrough_len,
-                ]));
-            let then_and_passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                    new_then_branch.to_value(&ctx).val,
-                    passthrough_suffix.to_value(&ctx).val,
-                ]));
-            let permuted_then_and_passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
-                    tmp_ctx.to_value(&ctx).val,
-                    then_and_passthrough.to_value(&ctx).val,
-                    pat.perm.to_value(&ctx).val,
-                ]));
-            let if_cond_and_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Single", &[pat.if_cond.to_value(&ctx).val]))
-                    .to_value(&ctx)
-                    .val,
-                    pat.if_inputs.to_value(&ctx).val,
-                ]));
-            let new_inputs_after_then = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
-                    tmp_ctx.to_value(&ctx).val,
-                    permuted_then_and_passthrough.to_value(&ctx).val,
-                    if_cond_and_inputs.to_value(&ctx).val,
-                ]));
-            let new_loop_outputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                    new_inputs_after_then.to_value(&ctx).val,
-                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[
-                            new_loop_arg.to_value(&ctx).val,
-                            if_inputs_len,
-                            passthrough_len,
-                        ]))
-                    .to_value(&ctx)
-                    .val,
-                ]));
+                ],
+            ));
+            let then_and_passthrough =
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Concat",
+                    &[
+                        new_then_branch.to_value(&ctx).val,
+                        passthrough_suffix.to_value(&ctx).val,
+                    ],
+                ));
+            let permuted_then_and_passthrough =
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Subst",
+                    &[
+                        tmp_ctx.to_value(&ctx).val,
+                        then_and_passthrough.to_value(&ctx).val,
+                        pat.perm.to_value(&ctx).val,
+                    ],
+                ));
+            let if_cond_and_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert(
+                    "Concat",
+                    &[
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                            (&ctx).insert("Single", &[pat.if_cond.to_value(&ctx).val]),
+                        )
+                        .to_value(&ctx)
+                        .val,
+                        pat.if_inputs.to_value(&ctx).val,
+                    ],
+                ),
+            );
+            let new_inputs_after_then =
+                eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                    "Subst",
+                    &[
+                        tmp_ctx.to_value(&ctx).val,
+                        permuted_then_and_passthrough.to_value(&ctx).val,
+                        if_cond_and_inputs.to_value(&ctx).val,
+                    ],
+                ));
+            let new_loop_outputs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert(
+                    "Concat",
+                    &[
+                        new_inputs_after_then.to_value(&ctx).val,
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                            "SubTuple",
+                            &[
+                                new_loop_arg.to_value(&ctx).val,
+                                if_inputs_len,
+                                passthrough_len,
+                            ],
+                        ))
+                        .to_value(&ctx)
+                        .val,
+                    ],
+                ),
+            );
 
-            let new_loop_input = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[
+            let new_loop_input = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Arg",
+                &[
                     new_loop_arg_ty.to_value(&ctx).val,
                     new_if_true_ctx.to_value(&ctx).val,
-                ]));
-            let new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("DoWhile", &[
+                ],
+            ));
+            let new_loop = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "DoWhile",
+                &[
                     new_loop_input.to_value(&ctx).val,
                     new_loop_outputs.to_value(&ctx).val,
-                ]));
-            let new_if = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("If", &[
-                    new_if_cond.to_value(&ctx).val,
-                    new_if_inp.to_value(&ctx).val,
-                    new_loop.to_value(&ctx).val,
-                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[
-                            new_loop_arg_ty.to_value(&ctx).val,
-                            new_if_false_ctx.to_value(&ctx).val,
-                        ]))
-                    .to_value(&ctx)
-                    .val,
-                ]));
+                ],
+            ));
+            let new_if = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert(
+                    "If",
+                    &[
+                        new_if_cond.to_value(&ctx).val,
+                        new_if_inp.to_value(&ctx).val,
+                        new_loop.to_value(&ctx).val,
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                            "Arg",
+                            &[
+                                new_loop_arg_ty.to_value(&ctx).val,
+                                new_if_false_ctx.to_value(&ctx).val,
+                            ],
+                        ))
+                        .to_value(&ctx)
+                        .val,
+                    ],
+                ),
+            );
 
-            let final_if_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[new_if.to_value(&ctx).val, zero, if_inputs_len]));
-            let else_branch_end = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+            let final_if_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "SubTuple",
+                &[new_if.to_value(&ctx).val, zero, if_inputs_len],
+            ));
+            let else_branch_end = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     pat.outer_ctx.to_value(&ctx).val,
                     final_if_inputs.to_value(&ctx).val,
                     pat.else_branch.to_value(&ctx).val,
-                ]));
-            let else_branch_end_and_passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Concat", &[
-                    else_branch_end.to_value(&ctx).val,
-                    eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[new_if.to_value(&ctx).val, if_inputs_len, passthrough_len]))
-                    .to_value(&ctx)
-                    .val,
-                ]));
-            let final_permuted = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[
+                ],
+            ));
+            let else_branch_end_and_passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new(
+                (&ctx).insert(
+                    "Concat",
+                    &[
+                        else_branch_end.to_value(&ctx).val,
+                        eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                            "SubTuple",
+                            &[new_if.to_value(&ctx).val, if_inputs_len, passthrough_len],
+                        ))
+                        .to_value(&ctx)
+                        .val,
+                    ],
+                ),
+            );
+            let final_permuted = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Subst",
+                &[
                     pat.outer_ctx.to_value(&ctx).val,
                     else_branch_end_and_passthrough.to_value(&ctx).val,
                     pat.perm.to_value(&ctx).val,
-                ]));
+                ],
+            ));
 
             ctx.union(final_permuted, pat.loop_expr);
-            let loop_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InLoop", &[
+            let loop_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
+                "InLoop",
+                &[
                     new_loop_input.to_value(&ctx).val,
                     new_loop_outputs.to_value(&ctx).val,
-                ]));
+                ],
+            ));
             ctx.union(tmp_ctx, loop_ctx);
             ctx.subsume(
                 "DoWhile",
@@ -1259,27 +1329,27 @@ mod native_tests {
             &crate::prologue_egglog_text(),
             &expr,
             &schedule,
-            "IVTNewInputsAnalysis",
+            "ivt_new_inputs_analysis",
         );
         let native_analysis_rows = native_function_size(
             &crate::feature_execution_prologue(true, None),
             &expr,
             &schedule,
             None,
-            "IVTNewInputsAnalysis",
+            "ivt_new_inputs_analysis",
         );
         let ablated_analysis_rows = native_function_size(
             &crate::feature_execution_prologue(true, Some("loop-inversion")),
             &expr,
             &ablated_schedule,
             Some("loop-inversion"),
-            "IVTNewInputsAnalysis",
+            "ivt_new_inputs_analysis",
         );
 
         assert_eq!(native_analysis_rows, text_analysis_rows);
         assert!(
             native_analysis_rows > 0,
-            "native ivt-analysis support should materialize IVTNewInputsAnalysis rows",
+            "native ivt-analysis support should materialize ivt_new_inputs_analysis rows",
         );
         assert_eq!(
             ablated_analysis_rows, native_analysis_rows,

@@ -55,14 +55,14 @@ const CONDITIONAL_INVARIANT_CODE_MOTION: &str = r#"(ruleset cicm)
         (= e1 (Uop o x))
         (HasType e1 (Base ty))
         (= (TCPair t1 c1) (ExtractedExpr e1))
-        (> 10 (Expr-size e1))
+        (> 10 (expr_size e1))
         (ExprIsPure e1)
         (ContextOf e1 (InIf true pred orig_ins))
 
         (= e2 (Uop o y))
         (HasType e2 (Base ty))
         (= (TCPair t2 c2) (ExtractedExpr e2))
-        (> 10 (Expr-size e2))
+        (> 10 (expr_size e2))
         (ExprIsPure e2)
         (ContextOf e2 (InIf false pred orig_ins))
 
@@ -129,7 +129,7 @@ const CONDITIONAL_INVARIANT_CODE_MOTION: &str = r#"(ruleset cicm)
         (= e2 (Bop o x2 y2))
         
         (= (TCPair t1 c1) (ExtractedExpr e1))
-        (> 10 (Expr-size e1))
+        (> 10 (expr_size e1))
         (ExprIsPure e1)
         (HasType e1 (Base ty))
         
@@ -137,7 +137,7 @@ const CONDITIONAL_INVARIANT_CODE_MOTION: &str = r#"(ruleset cicm)
         
         (HasType e2 (Base ty))
         (= (TCPair t2 c2) (ExtractedExpr e2))
-        (> 10 (Expr-size e2))
+        (> 10 (expr_size e2))
         (ExprIsPure e2)
 
         (= t1 t2)
@@ -328,10 +328,9 @@ pub(crate) mod native {
         let if_context = schema_dsl::ContextOf::query_fields(&if_e, &outer_ctx);
         let e1_match = e1.handle().eq(&schema_dsl::Uop::query(&op, &x).handle());
         let e1_has_type = schema_dsl::HasType::query_fields(&e1, &base_ty);
-        let e1_size = size1.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![e1.handle().into_handle_ty()],
-        ));
+        let e1_size = size1
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&e1).handle());
         let e1_small = size1.handle().lt(&10_i64);
         let e1_pure = schema_dsl::ExprIsPure::query_fields(&e1);
         let e1_context = schema_dsl::ContextOf::query_fields(&e1, &true_if_ctx);
@@ -345,10 +344,9 @@ pub(crate) mod native {
         ));
         let e2_match = e2.handle().eq(&schema_dsl::Uop::query(&op, &y).handle());
         let e2_has_type = schema_dsl::HasType::query_fields(&e2, &base_ty);
-        let e2_size = size2.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![e2.handle().into_handle_ty()],
-        ));
+        let e2_size = size2
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&e2).handle());
         let e2_small = size2.handle().lt(&10_i64);
         let e2_pure = schema_dsl::ExprIsPure::query_fields(&e2);
         let e2_context = schema_dsl::ContextOf::query_fields(&e2, &false_if_ctx);
@@ -491,14 +489,12 @@ pub(crate) mod native {
             "ExtractedExpr",
             vec![e2.handle().into_handle_ty()],
         ));
-        let e1_size = size1.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![e1.handle().into_handle_ty()],
-        ));
-        let e2_size = size2.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![e2.handle().into_handle_ty()],
-        ));
+        let e1_size = size1
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&e1).handle());
+        let e2_size = size2
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&e2).handle());
         let e1_small = size1.handle().lt(&10_i64);
         let e2_small = size2.handle().lt(&10_i64);
         let e1_pure = schema_dsl::ExprIsPure::query_fields(&e1);

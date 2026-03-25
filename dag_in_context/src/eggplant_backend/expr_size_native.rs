@@ -18,17 +18,32 @@ pub(crate) fn native_fragment() -> String {
 const GENERATED_MARKER: &str =
     "; (Generated from eggplant Rust: src/eggplant_backend/expr_size.rs)\n";
 const EXPR_SIZE_DECLS: &str = r#";; Compute the tree size of program, not dag size
-(function Expr-size (Expr) i64 :merge (min old new) )
-(function ListExpr-size (ListExpr) i64 :merge (min old new))
+(function expr_size (Expr) i64 :merge (min old new) )
+(function list_expr_size (ListExpr) i64 :merge (min old new))
 "#;
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
+    #![allow(non_camel_case_types)]
+
     use super::super::schema_dsl;
+    use super::super::schema_dsl::{Expr, ListExpr};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        prim_call, BaseVar, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
+
+    #[allow(non_camel_case_types)]
+    #[eggplant::func(output = i64, merge = "(min old new)")]
+    pub(crate) struct expr_size {
+        expr: Expr,
+    }
+
+    #[allow(non_camel_case_types)]
+    #[eggplant::func(output = i64, merge = "(min old new)")]
+    pub(crate) struct list_expr_size {
+        list: ListExpr,
+    }
 
     fn expr_leaf<PR: PatRecSgl>() -> schema_dsl::Expr<PR> {
         schema_dsl::Expr::query_leaf()
@@ -58,20 +73,14 @@ pub(crate) mod native {
         expr: &schema_dsl::Expr<PR>,
         out: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        out.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![expr.handle().into_handle_ty()],
-        ))
+        out.handle().eq(&expr_size::query(expr).handle())
     }
 
     fn list_expr_size_query<PR: PatRecSgl>(
         list: &schema_dsl::ListExpr<PR>,
         out: &BaseVar<i64, PR>,
     ) -> impl eggplant::wrap::constraint::IntoConstraintFact {
-        out.handle().eq(&prim_call::<i64>(
-            "ListExpr-size",
-            vec![list.handle().into_handle_ty()],
-        ))
+        out.handle().eq(&list_expr_size::query(list).handle())
     }
 
     fn ternary_op_leaf<PR: PatRecSgl>() -> schema_dsl::TernaryOp<PR> {
@@ -84,18 +93,6 @@ pub(crate) mod native {
 
     fn unary_op_leaf<PR: PatRecSgl>() -> schema_dsl::UnaryOp<PR> {
         schema_dsl::UnaryOp::query_leaf()
-    }
-
-    fn insert_expr_size(ctx: &eggplant::wrap::RuleCtx, expr: eggplant::egglog::Value, size: i64) {
-        ctx.insert_func_tbl("Expr-size", &[expr, ctx._intern_base::<i64, i64>(size)]);
-    }
-
-    fn insert_list_expr_size(
-        ctx: &eggplant::wrap::RuleCtx,
-        list: eggplant::egglog::Value,
-        size: i64,
-    ) {
-        ctx.insert_func_tbl("ListExpr-size", &[list, ctx._intern_base::<i64, i64>(size)]);
     }
 
     #[eggplant::pat_vars]
@@ -432,31 +429,27 @@ pub(crate) mod native {
             function_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.child_size) + 1;
-                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+                ctx.set_expr_size(pat.expr, size);
             },
         );
         PeepholeTx::add_rule("expr_size_const", always_run, const_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 1);
+            ctx.set_expr_size(pat.expr, 1);
         });
         PeepholeTx::add_rule("expr_size_top", always_run, top_size_pat, |ctx, pat| {
             let size =
                 ctx.devalue(pat.a_size) + ctx.devalue(pat.b_size) + ctx.devalue(pat.c_size) + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
         PeepholeTx::add_rule("expr_size_bop", always_run, bop_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size) + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
         PeepholeTx::add_rule("expr_size_uop", always_run, uop_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
         PeepholeTx::add_rule("expr_size_get", always_run, get_size_pat, |ctx, pat| {
-            insert_expr_size(
-                &ctx,
-                pat.expr.to_value(&ctx).val,
-                ctx.devalue(pat.child_size),
-            );
+            ctx.set_expr_size(pat.expr, ctx.devalue(pat.child_size));
         });
         PeepholeTx::add_rule(
             "expr_size_concat",
@@ -464,7 +457,7 @@ pub(crate) mod native {
             concat_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size);
-                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+                ctx.set_expr_size(pat.expr, size);
             },
         );
         PeepholeTx::add_rule(
@@ -472,11 +465,7 @@ pub(crate) mod native {
             always_run,
             single_size_pat,
             |ctx, pat| {
-                insert_expr_size(
-                    &ctx,
-                    pat.expr.to_value(&ctx).val,
-                    ctx.devalue(pat.child_size),
-                );
+                ctx.set_expr_size(pat.expr, ctx.devalue(pat.child_size));
             },
         );
         PeepholeTx::add_rule(
@@ -488,7 +477,7 @@ pub(crate) mod native {
                     + ctx.devalue(pat.inputs_size)
                     + ctx.devalue(pat.branches_size)
                     + 1;
-                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+                ctx.set_expr_size(pat.expr, size);
             },
         );
         PeepholeTx::add_rule("expr_size_if", always_run, if_size_pat, |ctx, pat| {
@@ -497,7 +486,7 @@ pub(crate) mod native {
                 + ctx.devalue(pat.then_size)
                 + ctx.devalue(pat.else_size)
                 + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
         PeepholeTx::add_rule(
             "expr_size_dowhile",
@@ -505,18 +494,18 @@ pub(crate) mod native {
             dowhile_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.lhs_size) + ctx.devalue(pat.rhs_size) + 1;
-                insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+                ctx.set_expr_size(pat.expr, size);
             },
         );
         PeepholeTx::add_rule("expr_size_arg", always_run, arg_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 1);
+            ctx.set_expr_size(pat.expr, 1);
         });
         PeepholeTx::add_rule("expr_size_call", always_run, call_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
         PeepholeTx::add_rule("expr_size_empty", always_run, empty_size_pat, |ctx, pat| {
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, 0);
+            ctx.set_expr_size(pat.expr, 0);
         });
         PeepholeTx::add_rule(
             "list_expr_size_cons",
@@ -524,7 +513,7 @@ pub(crate) mod native {
             cons_size_pat,
             |ctx, pat| {
                 let size = ctx.devalue(pat.head_size) + ctx.devalue(pat.tail_size);
-                insert_list_expr_size(&ctx, pat.list.to_value(&ctx).val, size);
+                ctx.set_list_expr_size(pat.list, size);
             },
         );
         PeepholeTx::add_rule(
@@ -532,12 +521,12 @@ pub(crate) mod native {
             always_run,
             nil_size_pat,
             |ctx, pat| {
-                insert_list_expr_size(&ctx, pat.list.to_value(&ctx).val, 0);
+                ctx.set_list_expr_size(pat.list, 0);
             },
         );
         PeepholeTx::add_rule("expr_size_alloc", always_run, alloc_size_pat, |ctx, pat| {
             let size = ctx.devalue(pat.child_size) + 1;
-            insert_expr_size(&ctx, pat.expr.to_value(&ctx).val, size);
+            ctx.set_expr_size(pat.expr, size);
         });
 
         always_run
@@ -561,7 +550,7 @@ mod native_tests {
 
     fn text_expr_size_holds(prologue: &str, expr: &str, branches: &str, schedule: &str) {
         let program = format!(
-            "{prologue}\n(let __rlcr_expr {expr})\n(let __rlcr_branches {branches})\n{schedule}\n(check (= (Expr-size __rlcr_expr) 2))\n(check (= (ListExpr-size __rlcr_branches) 1))\n"
+            "{prologue}\n(let __rlcr_expr {expr})\n(let __rlcr_branches {branches})\n{schedule}\n(check (= (expr_size __rlcr_expr) 2))\n(check (= (list_expr_size __rlcr_branches) 1))\n"
         );
         let mut egraph = EGraph::default();
         egraph.parse_and_run_program(None, &program).unwrap();
@@ -578,7 +567,7 @@ mod native_tests {
         crate::with_native_rules_egraph(prologue, &initialization, schedule, ablate, |egraph| {
             egraph.parse_and_run_program(
                 None,
-                "(check (= (Expr-size __rlcr_expr) 2))\n(check (= (ListExpr-size __rlcr_branches) 1))",
+                "(check (= (expr_size __rlcr_expr) 2))\n(check (= (list_expr_size __rlcr_branches) 1))",
             )?;
             Ok(())
         })
@@ -610,7 +599,7 @@ mod native_tests {
 
         assert!(
             ablated.is_err(),
-            "ablating expr-size should make the Expr-size witness fail",
+            "ablating expr-size should make the expr_size witness fail",
         );
     }
 }

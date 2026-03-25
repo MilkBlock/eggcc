@@ -28,14 +28,14 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
 
 ;; by default, guess that all loops run 1000 times
 (rule ((DoWhile inputs outputs))
-      ((set (LoopNumItersGuess inputs outputs) 1000))
+      ((set (loop_num_iters_guess inputs outputs) 1000))
       :ruleset loop-iters-analysis)
 
 ;; For a loop that is false, its num iters is 1
 (rule 
   ((= loop (DoWhile inputs outputs))
    (= (Const (Bool false) ty ctx) (Get outputs 0)))
-  ((set (LoopNumItersGuess inputs outputs) 1))
+  ((set (loop_num_iters_guess inputs outputs) 1))
 :ruleset loop-iters-analysis)
 
 ;; Figure out number of iterations for a loop with constant bounds and initial value
@@ -59,7 +59,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
    (>= end_constant start_const)
   )
   (
-    (set (LoopNumItersGuess inputs outputs) (/ (- end_constant start_const) increment))
+    (set (loop_num_iters_guess inputs outputs) (/ (- end_constant start_const) increment))
   )
   :ruleset loop-iters-analysis)
 
@@ -84,7 +84,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
    (>= end_constant start_const)
   )
   (
-    (set (LoopNumItersGuess inputs outputs) (+ (/ (- end_constant start_const) increment) 1))
+    (set (loop_num_iters_guess inputs outputs) (+ (/ (- end_constant start_const) increment) 1))
   )
   :ruleset loop-iters-analysis)
 
@@ -101,7 +101,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
 ;;  (ContextOf lhs ctx)
 ;;  (HasType inputs inputs-ty)
 ;;  (= outputs-len (tuple-length outputs))
-;;  (= old_cost (LoopNumItersGuess inputs outputs))
+;;  (= old_cost (loop_num_iters_guess inputs outputs))
 ;;  (< old_cost 3)
 ;;  )
 ;; (
@@ -127,7 +127,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
 ;;      (DoWhile new-loop-arg new-loop-body)
 ;;      (Arg inputs-ty else-ctx)))
 ;;
-;;  (set (LoopNumItersGuess new-loop-arg new-loop-body) (- old_cost 1))
+;;  (set (loop_num_iters_guess new-loop-arg new-loop-body) (- old_cost 1))
 ;;  )
 ;; :ruleset loop-peel)
 ;;
@@ -150,7 +150,7 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
    (> end_constant start_const)
    (= (% start_const 4) 0)
    (= (% end_constant 4) 0)
-   (= old_cost (LoopNumItersGuess inputs outputs))
+   (= old_cost (loop_num_iters_guess inputs outputs))
   )
   (
     (let one-iter (SubTuple outputs 1 num-inputs))
@@ -165,14 +165,15 @@ const LOOP_UNROLL: &str = r#";; Some simple simplifications of loops
     (let actual-ctx (InLoop inputs unrolled))
     (union (TmpCtx) actual-ctx)
 
-    (set (LoopNumItersGuess inputs unrolled) (/ old_cost 4))
+    (set (loop_num_iters_guess inputs unrolled) (/ old_cost 4))
     (delete (TmpCtx))
   )
   :ruleset loop-unroll)"#;
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-        use super::super::schema_dsl;
+    use super::super::schema_dsl;
+    use crate::eggplant_backend::loop_invariant::native::loop_num_iters_guessRuleCtx;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
         AsHandle, BaseVar, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
@@ -260,10 +261,9 @@ pub(crate) mod native {
             let inputs = pat.inputs.to_value(&ctx).val;
             let outputs = pat.outputs.to_value(&ctx).val;
             let num_inputs = ctx.lookup_expect("tuple-length", &[inputs]);
-            let Some(old_cost_value) = ctx.lookup("LoopNumItersGuess", &[inputs, outputs]) else {
+            let Some(old_cost) = ctx.try_read_loop_num_iters_guess(pat.inputs, pat.outputs) else {
                 return;
             };
-            let old_cost = ctx._devalue_base::<i64>(old_cost_value);
 
             let one_iter = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[outputs, ctx._intern_base::<i64, i64>(1), num_inputs]));
             let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("LoopUnrollTmpCtx", &[]));
@@ -288,14 +288,7 @@ pub(crate) mod native {
 
             ctx.union(pat.lhs, new_loop);
             ctx.union(tmp_ctx, actual_ctx);
-            ctx.insert_func_tbl(
-                "LoopNumItersGuess",
-                &[
-                    inputs,
-                    unrolled.to_value(&ctx).val,
-                    ctx._intern_base::<i64, i64>(old_cost / 4),
-                ],
-            );
+            ctx.set_loop_num_iters_guess(pat.inputs, unrolled, old_cost / 4);
             ctx.remove("LoopUnrollTmpCtx", &[]);
         });
 

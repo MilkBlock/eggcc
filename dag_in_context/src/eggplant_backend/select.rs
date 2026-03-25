@@ -121,8 +121,8 @@ const SELECT: &str = r#"(ruleset select_opt)
         (ExprIsPure (Get thn i))
         (ExprIsPure (Get els i))
         
-        (> 10 (Expr-size (Get thn i))) ; TODO: Tune these size limits
-        (> 10 (Expr-size (Get els i)))
+        (> 10 (expr_size (Get thn i))) ; TODO: Tune these size limits
+        (> 10 (expr_size (Get els i)))
         (= (TCPair t1 c1) (ExtractedExpr (Get thn i)))
         (= (TCPair t2 c2) (ExtractedExpr (Get els i)))
 
@@ -191,14 +191,12 @@ pub(crate) mod native {
         let thn_pure = schema_dsl::ExprIsPure::query_fields(&thn_out);
         let els_pure = schema_dsl::ExprIsPure::query_fields(&els_out);
         let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
-        let thn_size = size1.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![thn_out.handle().into_handle_ty()],
-        ));
-        let els_size = size2.handle().eq(&prim_call::<i64>(
-            "Expr-size",
-            vec![els_out.handle().into_handle_ty()],
-        ));
+        let thn_size = size1
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&thn_out).handle());
+        let els_size = size2
+            .handle()
+            .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&els_out).handle());
         let thn_small = size1.handle().lt(&10_i64);
         let els_small = size2.handle().lt(&10_i64);
         let thn_extracted = prim_call::<TermAndCostTy>(

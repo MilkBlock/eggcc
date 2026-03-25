@@ -30,7 +30,7 @@ pub(crate) struct EgraphInfo<'a> {
     pub(crate) roots: Vec<(RootId, NodeId)>,
     pub(crate) cm: &'a dyn CostModel,
     /// Optionally, a loop with (inputs, outputs) can have an estimated number of iterations.
-    /// This is found by looking at LoopNumItersGuess in the database.
+    /// This is found by looking at loop_num_iters_guess in the database.
     pub(crate) loop_iteration_estimates: IndexMap<(RootId, RootId), i64>,
     /// A set of names of functions that are unextractable
     unextractables: IndexSet<String>,
@@ -87,14 +87,14 @@ impl<'a> EgraphInfo<'a> {
 
         let mut loop_iteration_estimates = IndexMap::default();
 
-        // loop over all nodes, finding LoopNumItersGuess nodes
+        // loop over all nodes, finding loop_num_iters_guess nodes
         for (_nodeid, node) in &egraph.nodes {
-            if node.op == "LoopNumItersGuess" {
+            if node.op == "loop_num_iters_guess" {
                 // assert it has two children
                 assert_eq!(
                     node.children.len(),
                     2,
-                    "LoopNumItersGuess node has wrong number of children. Node: {:?}",
+                    "loop_num_iters_guess node has wrong number of children. Node: {:?}",
                     node
                 );
                 loop_iteration_estimates.insert(
@@ -1162,7 +1162,7 @@ impl CostModel for DefaultCostModel {
             "Call" => 1000000., // high cost of calls by default
             // Control
             "Program" | "Function" => 0.,
-            // custom logic for DoWhile will multiply the body by the LoopNumItersGuess
+            // custom logic for DoWhile will multiply the body by the loop_num_iters_guess
             "DoWhile" => 1.,
             "If" | "Switch" => 50.,
             // Schema
@@ -2010,9 +2010,9 @@ pub fn prune_egraph(
         }
     }
 
-    // copy over "LoopNumItersGuess" nodes, which depend on integers and strings
+    // copy over "loop_num_iters_guess" nodes, which depend on integers and strings
     for (nodeid, node) in &egraph.nodes {
-        if node.op == "LoopNumItersGuess"
+        if node.op == "loop_num_iters_guess"
             && visited.contains(egraph.nid_to_cid(&node.children[0]))
             && visited.contains(egraph.nid_to_cid(&node.children[1]))
         {

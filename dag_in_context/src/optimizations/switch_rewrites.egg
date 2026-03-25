@@ -110,7 +110,7 @@
        
        ;; For early returns, Y might be fairly large
        ;; limit the size we match on here
-       (< (Expr-size Y) 100))
+       (< (expr_size Y) 100))
 
       ((let outer_ins (Concat (Single b) ins))
        (let outer_ins_ty (TupleT (TCons (BoolT) ins_ty)))
@@ -133,8 +133,8 @@
        (= len (tuple-length ins))
        
        ;; limit the size, since X and Y get new contexts
-       (< (Expr-size X) 100)
-       (< (Expr-size Y) 100)
+       (< (expr_size X) 100)
+       (< (expr_size Y) 100)
        )
 
       ((let outer_ins (Concat (Single b) ins))

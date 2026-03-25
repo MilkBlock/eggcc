@@ -38,7 +38,7 @@
   (ContextOf lhs ctx)
   (HasType inputs inputs-ty)
   (= outputs-len (tuple-length outputs))
-  (= old_cost (LoopNumItersGuess inputs outputs))
+  (= old_cost (loop_num_iters_guess inputs outputs))
   (<= old_cost 5)
   )
  (
@@ -65,6 +65,6 @@
       (DoWhile new-loop-input new-loop-body)
       (Arg inputs-ty else-ctx)))
 
-  (set (LoopNumItersGuess new-loop-input new-loop-body) (- old_cost 1))
+  (set (loop_num_iters_guess new-loop-input new-loop-body) (- old_cost 1))
   )
  :ruleset non-weakly-linear)

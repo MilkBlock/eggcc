@@ -120,7 +120,7 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
        
        ;; For early returns, Y might be fairly large
        ;; limit the size we match on here
-       (< (Expr-size Y) 100))
+       (< (expr_size Y) 100))
 
       ((let outer_ins (Concat (Single b) ins))
        (let outer_ins_ty (TupleT (TCons (BoolT) ins_ty)))
@@ -143,8 +143,8 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
        (= len (tuple-length ins))
        
        ;; limit the size, since X and Y get new contexts
-       (< (Expr-size X) 100)
-       (< (Expr-size Y) 100)
+       (< (expr_size X) 100)
+       (< (expr_size Y) 100)
        )
 
       ((let outer_ins (Concat (Single b) ins))
@@ -587,7 +587,7 @@ pub(crate) mod native {
             vec![ins.handle().into_handle_ty()],
         ));
         let rhs_small =
-            prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).lt(&100_i64);
+            crate::eggplant_backend::expr_size::native::expr_size::query(&y).handle().lt(&100_i64);
 
         SwitchAndPat::new(lhs, a, b, ins, ins_has_type, x, y, ins_ty)
             .assert(tuple_len_known)
@@ -627,9 +627,9 @@ pub(crate) mod native {
             vec![ins.handle().into_handle_ty()],
         ));
         let lhs_small =
-            prim_call::<i64>("Expr-size", vec![x.handle().into_handle_ty()]).lt(&100_i64);
+            crate::eggplant_backend::expr_size::native::expr_size::query(&x).handle().lt(&100_i64);
         let rhs_small =
-            prim_call::<i64>("Expr-size", vec![y.handle().into_handle_ty()]).lt(&100_i64);
+            crate::eggplant_backend::expr_size::native::expr_size::query(&y).handle().lt(&100_i64);
 
         SwitchOrPat::new(lhs, a, b, ins, ins_has_type, x, y, ins_ty)
             .assert(tuple_len_known)

@@ -311,7 +311,7 @@ const SCHEMA_EGGLOG: &str = r#"; Every term is an `Expr` or a `ListExpr`.
 
 ;;                      inputs, outputs -> number of iterations
 ;; The minimum possible guess is 1 because of do-while loops
-(function LoopNumItersGuess (Expr Expr) i64 :merge (max 1 (min old new)))
+(function loop_num_iters_guess (Expr Expr) i64 :merge (max 1 (min old new)))
 
 
 ;; A hint for no-context mode that this rule
@@ -669,7 +669,7 @@ fn inject_tuple_operations_section(schema: &str, replacement: &str) -> String {
 
 fn inject_terms_section(schema: &str, replacement: &str) -> String {
     const TERMS_MARKER: &str = "; TERMS\n";
-    const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function LoopNumItersGuess";
+    const LOOP_NUM_ITERS_GUESS_FUNCTION: &str = "(function loop_num_iters_guess";
 
     let marker_start = schema
         .find(TERMS_MARKER)
