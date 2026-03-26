@@ -243,7 +243,8 @@ pub(crate) mod native {
 
     use super::super::schema_dsl;
     use super::super::schema_dsl::{
-        Expr, IVTNewInputsAnalysisDemandPRRuleCtx, IVTRes, IVTResPRRuleCtx, Node, NodePRRuleCtx,
+        Expr, ExprRuleCtx, IVTNewInputsAnalysisDemandPRRuleCtx, IVTRes, IVTResPRRuleCtx, Node,
+        NodePRRuleCtx,
     };
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
@@ -742,27 +743,11 @@ pub(crate) mod native {
                     "Arg",
                     &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
                 ));
+                let if_access = ctx.insert_single(ctx.insert_get(tmp_arg, ctx.devalue(pat.if_get.index)));
                 let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new(
                     (&ctx).insert(
                         "Concat",
-                        &[
-                            pat.perm.to_value(&ctx).val,
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                (&ctx).insert(
-                                    "Single",
-                                    &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                        (&ctx).insert(
-                                            "Get",
-                                            &[tmp_arg.to_value(&ctx).val, pat.if_get.index.val],
-                                        ),
-                                    )
-                                    .to_value(&ctx)
-                                    .val],
-                                ),
-                            )
-                            .to_value(&ctx)
-                            .val,
-                        ],
+                        &[pat.perm.to_value(&ctx).val, if_access.val],
                     ),
                 );
                 let ifnode = ctx.insert_if_node(
@@ -799,48 +784,17 @@ pub(crate) mod native {
                 ));
                 let len = ctx.devalue(pat.len);
                 let if_len = ctx.devalue(pat.if_len);
-                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert(
-                        "Single",
-                        &[
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
-                                "Get",
-                                &[
-                                    tmp_arg.to_value(&ctx).val,
-                                    ctx._intern_base::<i64, i64>(if_len + len),
-                                ],
-                            ))
-                            .to_value(&ctx)
-                            .val,
-                        ],
-                    ),
-                );
+                let get_passed_through =
+                    ctx.insert_single(ctx.insert_get(tmp_arg, if_len + len));
                 let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Concat",
-                    &[
-                        pat.perm.to_value(&ctx).val,
-                        get_passed_through.to_value(&ctx).val,
-                    ],
+                    &[pat.perm.to_value(&ctx).val, get_passed_through.val],
                 ));
-                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert(
-                        "Single",
-                        &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                            (&ctx).insert(
-                                "Get",
-                                &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val],
-                            ),
-                        )
-                        .to_value(&ctx)
-                        .val],
-                    ),
-                );
+                let original_get_index =
+                    ctx.insert_single(ctx.insert_get(tmp_arg, ctx.devalue(pat.arg_get.index)));
                 let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Concat",
-                    &[
-                        pat.pperm.to_value(&ctx).val,
-                        original_get_index.to_value(&ctx).val,
-                    ],
+                    &[pat.pperm.to_value(&ctx).val, original_get_index.val],
                 ));
                 let tnil =
                     eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
@@ -886,27 +840,11 @@ pub(crate) mod native {
                     "Arg",
                     &[tmp_type.to_value(&ctx).val, no_ctx.to_value(&ctx).val],
                 ));
+                let last_access = ctx.insert_single(ctx.insert_get(tmp_arg, ctx.devalue(pat.last.index)));
                 let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new(
                     (&ctx).insert(
                         "Concat",
-                        &[
-                            pat.perm.to_value(&ctx).val,
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                (&ctx).insert(
-                                    "Single",
-                                    &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                        (&ctx).insert(
-                                            "Get",
-                                            &[tmp_arg.to_value(&ctx).val, pat.last.index.val],
-                                        ),
-                                    )
-                                    .to_value(&ctx)
-                                    .val],
-                                ),
-                            )
-                            .to_value(&ctx)
-                            .val,
-                        ],
+                        &[pat.perm.to_value(&ctx).val, last_access.val],
                     ),
                 );
                 let ifnode = ctx.insert_if_node(
@@ -943,48 +881,17 @@ pub(crate) mod native {
                 ));
                 let len = ctx.devalue(pat.len);
                 let if_len = ctx.devalue(pat.if_len);
-                let get_passed_through = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert(
-                        "Single",
-                        &[
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
-                                "Get",
-                                &[
-                                    tmp_arg.to_value(&ctx).val,
-                                    ctx._intern_base::<i64, i64>(if_len + len),
-                                ],
-                            ))
-                            .to_value(&ctx)
-                            .val,
-                        ],
-                    ),
-                );
+                let get_passed_through =
+                    ctx.insert_single(ctx.insert_get(tmp_arg, if_len + len));
                 let new_perm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Concat",
-                    &[
-                        pat.perm.to_value(&ctx).val,
-                        get_passed_through.to_value(&ctx).val,
-                    ],
+                    &[pat.perm.to_value(&ctx).val, get_passed_through.val],
                 ));
-                let original_get_index = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert(
-                        "Single",
-                        &[eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                            (&ctx).insert(
-                                "Get",
-                                &[tmp_arg.to_value(&ctx).val, pat.arg_get.index.val],
-                            ),
-                        )
-                        .to_value(&ctx)
-                        .val],
-                    ),
-                );
+                let original_get_index =
+                    ctx.insert_single(ctx.insert_get(tmp_arg, ctx.devalue(pat.arg_get.index)));
                 let new_pperm = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Concat",
-                    &[
-                        pat.pperm.to_value(&ctx).val,
-                        original_get_index.to_value(&ctx).val,
-                    ],
+                    &[pat.pperm.to_value(&ctx).val, original_get_index.val],
                 ));
                 let tnil =
                     eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
@@ -1134,19 +1041,13 @@ pub(crate) mod native {
                         pat.perm.to_value(&ctx).val,
                     ],
                 ));
-            let if_cond_and_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                (&ctx).insert(
-                    "Concat",
-                    &[
-                        eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                            (&ctx).insert("Single", &[pat.if_cond.to_value(&ctx).val]),
-                        )
-                        .to_value(&ctx)
-                        .val,
-                        pat.if_inputs.to_value(&ctx).val,
-                    ],
-                ),
-            );
+            let if_cond_and_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
+                "Concat",
+                &[
+                    ctx.insert_single(pat.if_cond).val,
+                    pat.if_inputs.to_value(&ctx).val,
+                ],
+            ));
             let new_inputs_after_then =
                 eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
