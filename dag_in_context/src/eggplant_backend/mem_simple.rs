@@ -163,7 +163,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use crate::eggplant_backend::schema_dsl::{BinaryOpRuleCtx, ExprRuleCtx, TernaryOpRuleCtx};
-    use eggplant::prelude::{PatRecSgl, RuleRunnerSgl, RuleSetId};
+    use eggplant::prelude::{PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
     #[eggplant::pat_vars]
     struct CommuteWriteLoadPat<PR: PatRecSgl> {
@@ -184,9 +184,13 @@ pub(crate) mod native {
         let write =
             schema_dsl::Top::query(&schema_dsl::Write::query(), &write_addr, &write_val, &state);
         let load = schema_dsl::Bop::query(&schema_dsl::Load::query(), &load_addr, &write);
-        let no_alias = schema_dsl::NoAlias::query_fields(&write_addr, &load_addr);
+        let no_alias = schema_dsl::NoAlias::query();
+        let same_write_addr = no_alias.lhs.handle().eq(&write_addr.handle());
+        let same_load_addr = no_alias.rhs.handle().eq(&load_addr.handle());
 
         CommuteWriteLoadPat::new(write_addr, load_addr, write_val, state, write, load, no_alias)
+            .assert(same_write_addr)
+            .assert(same_load_addr)
     }
 
     #[eggplant::pat_vars]

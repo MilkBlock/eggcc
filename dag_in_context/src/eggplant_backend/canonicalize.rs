@@ -325,10 +325,19 @@ pub(crate) mod native {
         let ctx = schema_dsl::Assumption::query_leaf();
         let bop = schema_dsl::Bop::query(&schema_dsl::GreaterEq::query(), &x, &y);
         let expr_is_bop = expr.handle().eq(&bop.handle());
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&x, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&x.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
-        CanonTypedBopPat::new(expr, x, y, ty, ctx, has_arg_type, context_of).assert(expr_is_bop)
+        CanonTypedBopPat::new(expr, x, y, ty, ctx, has_arg_type, context_of)
+            .assert(expr_is_bop)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     fn less_eq_pat<PR: PatRecSgl>() -> CanonTypedBopPat<PR> {
@@ -339,10 +348,19 @@ pub(crate) mod native {
         let ctx = schema_dsl::Assumption::query_leaf();
         let bop = schema_dsl::Bop::query(&schema_dsl::LessEq::query(), &x, &y);
         let expr_is_bop = expr.handle().eq(&bop.handle());
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&y, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&y.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
-        CanonTypedBopPat::new(expr, x, y, ty, ctx, has_arg_type, context_of).assert(expr_is_bop)
+        CanonTypedBopPat::new(expr, x, y, ty, ctx, has_arg_type, context_of)
+            .assert(expr_is_bop)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {

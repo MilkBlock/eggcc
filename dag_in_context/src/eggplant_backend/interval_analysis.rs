@@ -106,14 +106,22 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_int.handle());
         let lo_value_matches = lo_int.handle_value().eq(&value.handle());
         let hi_value_matches = hi_int.handle_value().eq(&value.handle());
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
         IntConstFoldPat::new(expr, ty, ctx, value, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(hi_matches)
             .assert(lo_value_matches)
             .assert(hi_value_matches)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     fn bool_const_fold_pat<PR: PatRecSgl>() -> BoolConstFoldPat<PR> {
@@ -129,14 +137,22 @@ pub(crate) mod native {
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&value.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&value.handle());
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
         BoolConstFoldPat::new(expr, ty, ctx, value, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(hi_matches)
             .assert(lo_value_matches)
             .assert(hi_value_matches)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     fn lower_true_pat<PR: PatRecSgl>() -> BoolKnownPat<PR> {
@@ -147,12 +163,20 @@ pub(crate) mod native {
         let lo_bool = bool_bound::<PR>();
         let lo_matches = lo.handle().eq(&lo_bool.handle());
         let lo_value_matches = lo_bool.handle_value().eq(&true);
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
         BoolKnownPat::new(expr, ty, ctx, has_arg_type, context_of)
             .assert(lo_matches)
             .assert(lo_value_matches)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     fn upper_false_pat<PR: PatRecSgl>() -> BoolKnownPat<PR> {
@@ -163,12 +187,20 @@ pub(crate) mod native {
         let hi_bool = bool_bound::<PR>();
         let hi_matches = hi.handle().eq(&hi_bool.handle());
         let hi_value_matches = hi_bool.handle_value().eq(&false);
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
-        let context_of = schema_dsl::ContextOf::query_fields(&expr, &ctx);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let context_of = schema_dsl::ContextOf::query();
+        let same_arg_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_arg_ty = has_arg_type.ty.handle().eq(&ty.handle());
+        let same_context_expr = context_of.expr.handle().eq(&expr.handle());
+        let same_context_ctx = context_of.ctx.handle().eq(&ctx.handle());
 
         BoolKnownPat::new(expr, ty, ctx, has_arg_type, context_of)
             .assert(hi_matches)
             .assert(hi_value_matches)
+            .assert(same_arg_expr)
+            .assert(same_arg_ty)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
