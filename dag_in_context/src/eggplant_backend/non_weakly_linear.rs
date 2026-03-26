@@ -182,8 +182,12 @@ pub(crate) mod native {
         let lhs = schema_dsl::DoWhile::query(&inputs, &outputs);
         let ctx = schema_dsl::Assumption::query_leaf();
         let inputs_ty = schema_dsl::Type::query_leaf();
-        let loop_context = schema_dsl::ContextOf::query_fields(&lhs, &ctx);
-        let inputs_have_type = schema_dsl::HasType::query_fields(&inputs, &inputs_ty);
+        let loop_context = schema_dsl::ContextOf::query();
+        let inputs_have_type = schema_dsl::HasType::query();
+        let loop_context_matches_lhs = loop_context.expr.handle().eq(&lhs.handle());
+        let loop_context_matches_ctx = loop_context.ctx.handle().eq(&ctx.handle());
+        let inputs_have_type_matches_inputs = inputs_have_type.expr.handle().eq(&inputs.handle());
+        let inputs_have_type_matches_ty = inputs_have_type.ty.handle().eq(&inputs_ty.handle());
 
         LoopPeelPat::new(
             lhs,
@@ -194,6 +198,10 @@ pub(crate) mod native {
             loop_context,
             inputs_have_type,
         )
+        .assert(loop_context_matches_lhs)
+        .assert(loop_context_matches_ctx)
+        .assert(inputs_have_type_matches_inputs)
+        .assert(inputs_have_type_matches_ty)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {

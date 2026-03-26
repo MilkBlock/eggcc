@@ -182,13 +182,19 @@ pub(crate) mod native {
             .eq(&(lhs.handle_index() + (&1_i64).as_handle()));
         let arg_index_matches = arg_out.handle_index().eq(&lhs.handle_index());
         let same_body_value = body_out.handle().eq(&arg_out.handle());
-        let has_type = schema_dsl::HasType::query_fields(&lhs, &lhs_ty);
-        let pure_type = schema_dsl::PureType::query_fields(&lhs_ty);
+        let has_type = schema_dsl::HasType::query();
+        let pure_type = schema_dsl::PureType::query();
+        let same_typed_expr = has_type.expr.handle().eq(&lhs.handle());
+        let same_lhs_ty = has_type.ty.handle().eq(&lhs_ty.handle());
+        let pure_type_matches = pure_type.ty.handle().eq(&lhs_ty.handle());
 
         LoopThetaPat::new(inputs, lhs, has_type, pure_type)
             .assert(body_index_matches)
             .assert(arg_index_matches)
             .assert(same_body_value)
+            .assert(same_typed_expr)
+            .assert(same_lhs_ty)
+            .assert(pure_type_matches)
     }
 
     #[eggplant::pat_vars]
@@ -224,7 +230,9 @@ pub(crate) mod native {
         let same_arg_index = arg0_out.handle_index().eq(&arg1_out.handle_index());
         let same_branch0_value = branch0_out.handle().eq(&arg0_out.handle());
         let same_branch1_value = branch1_out.handle().eq(&arg1_out.handle());
-        let has_type = schema_dsl::HasType::query_fields(&lhs, &lhs_ty);
+        let has_type = schema_dsl::HasType::query();
+        let same_typed_expr = has_type.expr.handle().eq(&lhs.handle());
+        let same_lhs_ty = has_type.ty.handle().eq(&lhs_ty.handle());
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
         SwitchArgPat::new(inputs, arg0_out, lhs, has_type)
@@ -233,6 +241,8 @@ pub(crate) mod native {
             .assert(same_arg_index)
             .assert(same_branch0_value)
             .assert(same_branch1_value)
+            .assert(same_typed_expr)
+            .assert(same_lhs_ty)
             .assert(is_not_state)
     }
 
@@ -300,7 +310,9 @@ pub(crate) mod native {
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_type = schema_dsl::HasType::query_fields(&then_branch, &lhs_ty);
+        let has_type = schema_dsl::HasType::query();
+        let same_typed_expr = has_type.expr.handle().eq(&then_branch.handle());
+        let same_lhs_ty = has_type.ty.handle().eq(&lhs_ty.handle());
         let is_not_state = lhs_ty.handle().ne(&state_type::<PR>().handle());
 
         IfArgPat::new(inputs, then_arg_out, lhs, has_type)
@@ -309,6 +321,8 @@ pub(crate) mod native {
             .assert(same_arg_index)
             .assert(same_then_value)
             .assert(same_else_value)
+            .assert(same_typed_expr)
+            .assert(same_lhs_ty)
             .assert(is_not_state)
     }
 
@@ -340,12 +354,15 @@ pub(crate) mod native {
         let else_arg = schema_dsl::Arg::query(&arg_ty, &else_ctx);
         let then_arg_out = schema_dsl::Get::query(&then_arg);
         let else_arg_out = schema_dsl::Get::query(&else_arg);
+        let state_ty = state_type::<PR>();
         let same_then_index = then_branch.handle_index().eq(&lhs.handle_index());
         let same_else_index = else_branch.handle_index().eq(&lhs.handle_index());
         let same_arg_index = then_arg_out.handle_index().eq(&else_arg_out.handle_index());
         let same_then_value = then_branch.handle().eq(&then_arg_out.handle());
         let same_else_value = else_branch.handle().eq(&else_arg_out.handle());
-        let has_state_type = schema_dsl::HasType::query_fields(&then_branch, &state_type::<PR>());
+        let has_state_type = schema_dsl::HasType::query();
+        let same_typed_expr = has_state_type.expr.handle().eq(&then_branch.handle());
+        let same_state_ty = has_state_type.ty.handle().eq(&state_ty.handle());
 
         IfStateEdgePat::new(
             pred,
@@ -362,6 +379,8 @@ pub(crate) mod native {
         .assert(same_arg_index)
         .assert(same_then_value)
         .assert(same_else_value)
+        .assert(same_typed_expr)
+        .assert(same_state_ty)
     }
 
     #[eggplant::pat_vars]

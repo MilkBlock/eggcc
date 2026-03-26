@@ -345,144 +345,144 @@ where
 
 #[eggplant::relation]
 pub(crate) struct ContextOf {
-    expr: Expr,
-    ctx: Assumption,
+    pub(crate) expr: Expr,
+    pub(crate) ctx: Assumption,
 }
 
 #[eggplant::relation]
 pub(crate) struct HasArgType {
-    expr: Expr,
-    ty: Type,
+    pub(crate) expr: Expr,
+    pub(crate) ty: Type,
 }
 
 #[eggplant::relation]
 pub(crate) struct HasType {
-    expr: Expr,
-    ty: Type,
+    pub(crate) expr: Expr,
+    pub(crate) ty: Type,
 }
 
 #[eggplant::relation]
 pub(crate) struct ExprIsPure {
-    expr: Expr,
+    pub(crate) expr: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct ExprIsResolved {
-    expr: Expr,
+    pub(crate) expr: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct PureBaseType {
-    ty: BaseType,
+    pub(crate) ty: BaseType,
 }
 
 #[eggplant::relation]
 pub(crate) struct PureType {
-    ty: Type,
+    pub(crate) ty: Type,
 }
 
 #[eggplant::relation]
 pub(crate) struct PureTypeList {
-    tylist: TypeList,
+    pub(crate) tylist: TypeList,
 }
 
 #[eggplant::relation]
 pub(crate) struct InvCodeMotionCandidate {
-    e1: Expr,
-    e2: Expr,
+    pub(crate) e1: Expr,
+    pub(crate) e2: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct ExtractedExprCache {
-    term: Term,
-    expr: Expr,
-    ctx: Assumption,
+    pub(crate) term: Term,
+    pub(crate) expr: Expr,
+    pub(crate) ctx: Assumption,
 }
 
 #[eggplant::relation]
 pub(crate) struct IVTNewInputsAnalysisDemand {
-    expr: Expr,
+    pub(crate) expr: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct TernaryOpIsPure {
-    op: TernaryOp,
+    pub(crate) op: TernaryOp,
 }
 
 #[eggplant::relation]
 pub(crate) struct BinaryOpIsPure {
-    op: BinaryOp,
+    pub(crate) op: BinaryOp,
 }
 
 #[eggplant::relation]
 pub(crate) struct UnaryOpIsPure {
-    op: UnaryOp,
+    pub(crate) op: UnaryOp,
 }
 
 #[eggplant::relation]
 pub(crate) struct NoAlias {
-    lhs: Expr,
-    rhs: Expr,
+    pub(crate) lhs: Expr,
+    pub(crate) rhs: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct IsIsEven {
-    expr: Expr,
-    input: Expr,
+    pub(crate) expr: Expr,
+    pub(crate) input: Expr,
 }
 
 #[allow(non_camel_case_types)]
 #[eggplant::relation]
 pub(crate) struct NTZIterations {
-    loop_expr: Expr,
-    input: Expr,
-    index: i64,
+    pub(crate) loop_expr: Expr,
+    pub(crate) input: Expr,
+    pub(crate) index: i64,
 }
 
 #[eggplant::relation]
 pub(crate) struct BodyContainsExpr {
-    body: Expr,
-    expr: Expr,
+    pub(crate) body: Expr,
+    pub(crate) expr: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct BodyContainsListExpr {
-    body: Expr,
-    list: ListExpr,
+    pub(crate) body: Expr,
+    pub(crate) list: ListExpr,
 }
 
 #[eggplant::relation]
 pub(crate) struct IsInvExpr {
-    body: Expr,
-    expr: Expr,
+    pub(crate) body: Expr,
+    pub(crate) expr: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct IsInvListExpr {
-    body: Expr,
-    list: ListExpr,
+    pub(crate) body: Expr,
+    pub(crate) list: ListExpr,
 }
 
 #[eggplant::relation]
 pub(crate) struct IsInvListExprHelper {
-    body: Expr,
-    list: ListExpr,
-    index: i64,
+    pub(crate) body: Expr,
+    pub(crate) list: ListExpr,
+    pub(crate) index: i64,
 }
 
 #[eggplant::relation]
 pub(crate) struct LsrInv {
-    loop_expr: Expr,
-    input: Expr,
-    output: Expr,
+    pub(crate) loop_expr: Expr,
+    pub(crate) input: Expr,
+    pub(crate) output: Expr,
 }
 
 #[eggplant::relation]
 pub(crate) struct ToSubsumeIf {
-    pred: Expr,
-    inputs: Expr,
-    then_branch: Expr,
-    else_branch: Expr,
+    pub(crate) pred: Expr,
+    pub(crate) inputs: Expr,
+    pub(crate) then_branch: Expr,
+    pub(crate) else_branch: Expr,
 }
 
 #[eggplant::dsl]

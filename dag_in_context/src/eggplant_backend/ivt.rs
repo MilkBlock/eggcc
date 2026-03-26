@@ -302,8 +302,9 @@ pub(crate) mod native {
         let if_expr = schema_dsl::If::query(&pred, &inputs, &then_branch, &else_branch);
         let loop_get = schema_dsl::Get::query(&loop_body);
         let if_get = schema_dsl::Get::query(&if_eclass);
-        let demand = schema_dsl::IVTNewInputsAnalysisDemand::query_fields(&loop_body);
+        let demand = schema_dsl::IVTNewInputsAnalysisDemand::query();
 
+        let demand_matches_loop_body = demand.expr.handle().eq(&loop_body.handle());
         let loop_matches_concat = loop_body.handle().eq(&concat_body.handle());
         let if_matches = if_eclass.handle().eq(&if_expr.handle());
         let same_get = loop_get.handle().eq(&if_get.handle());
@@ -319,6 +320,7 @@ pub(crate) mod native {
             then_branch,
             else_branch,
         )
+        .assert(demand_matches_loop_body)
         .assert(loop_matches_concat)
         .assert(if_matches)
         .assert(same_get)
@@ -420,9 +422,11 @@ pub(crate) mod native {
         let loop_get = schema_dsl::Get::query(&loop_body);
         let new_ty = schema_dsl::BaseType::query_leaf();
         let new_base_ty = schema_dsl::Base::query(&new_ty);
-        let arg_has_base_type = schema_dsl::HasType::query_fields(&arg_get, &new_base_ty);
+        let arg_has_base_type = schema_dsl::HasType::query();
         let single_arg_get = schema_dsl::Single::query(&arg_get);
         let curr = schema_dsl::Concat::query(&single_arg_get, &rest);
+        let arg_has_base_type_matches_arg = arg_has_base_type.expr.handle().eq(&arg_get.handle());
+        let arg_has_base_type_matches_ty = arg_has_base_type.ty.handle().eq(&new_base_ty.handle());
         let loop_matches_arg = loop_get.handle().eq(&arg_get.handle());
         let shifted_index = loop_get
             .handle_index()
@@ -456,6 +460,8 @@ pub(crate) mod native {
             arg_has_base_type,
             new_ty,
         )
+        .assert(arg_has_base_type_matches_arg)
+        .assert(arg_has_base_type_matches_ty)
         .assert(analysis_matches)
         .assert(len_matches)
         .assert(if_len_known)
@@ -552,8 +558,10 @@ pub(crate) mod native {
         let loop_get = schema_dsl::Get::query(&loop_body);
         let new_ty = schema_dsl::BaseType::query_leaf();
         let new_base_ty = schema_dsl::Base::query(&new_ty);
-        let arg_has_base_type = schema_dsl::HasType::query_fields(&arg_get, &new_base_ty);
+        let arg_has_base_type = schema_dsl::HasType::query();
         let curr = schema_dsl::Single::query(&arg_get);
+        let arg_has_base_type_matches_arg = arg_has_base_type.expr.handle().eq(&arg_get.handle());
+        let arg_has_base_type_matches_ty = arg_has_base_type.ty.handle().eq(&new_base_ty.handle());
         let loop_matches_arg = loop_get.handle().eq(&arg_get.handle());
         let shifted_index = loop_get
             .handle_index()
@@ -586,6 +594,8 @@ pub(crate) mod native {
             arg_has_base_type,
             new_ty,
         )
+        .assert(arg_has_base_type_matches_arg)
+        .assert(arg_has_base_type_matches_ty)
         .assert(analysis_matches)
         .assert(len_matches)
         .assert(if_len_known)
@@ -629,9 +639,16 @@ pub(crate) mod native {
         let if_ctx = schema_dsl::Assumption::query_leaf();
         let inputs_ty_list = schema_dsl::TypeList::query_leaf();
         let inputs_ty = schema_dsl::TupleT::query(&inputs_ty_list);
-        let outer_context = schema_dsl::ContextOf::query_fields(&inp_w, &outer_ctx);
-        let if_context = schema_dsl::ContextOf::query_fields(&if_inputs, &if_ctx);
-        let if_inputs_have_type = schema_dsl::HasType::query_fields(&if_inputs, &inputs_ty);
+        let outer_context = schema_dsl::ContextOf::query();
+        let if_context = schema_dsl::ContextOf::query();
+        let if_inputs_have_type = schema_dsl::HasType::query();
+        let outer_context_matches_expr = outer_context.expr.handle().eq(&inp_w.handle());
+        let outer_context_matches_ctx = outer_context.ctx.handle().eq(&outer_ctx.handle());
+        let if_context_matches_expr = if_context.expr.handle().eq(&if_inputs.handle());
+        let if_context_matches_ctx = if_context.ctx.handle().eq(&if_ctx.handle());
+        let if_inputs_have_type_matches_expr =
+            if_inputs_have_type.expr.handle().eq(&if_inputs.handle());
+        let if_inputs_have_type_matches_ty = if_inputs_have_type.ty.handle().eq(&inputs_ty.handle());
         let len = BaseVar::<i64, PR>::query_named("_len");
         let ifnode =
             schema_dsl::IfNode::query(&if_expr, &if_cond, &if_inputs, &then_branch, &else_branch);
@@ -659,6 +676,12 @@ pub(crate) mod native {
             if_context,
             if_inputs_have_type,
         )
+        .assert(outer_context_matches_expr)
+        .assert(outer_context_matches_ctx)
+        .assert(if_context_matches_expr)
+        .assert(if_context_matches_ctx)
+        .assert(if_inputs_have_type_matches_expr)
+        .assert(if_inputs_have_type_matches_ty)
         .assert(analysis_matches)
         .assert(len_matches)
     }

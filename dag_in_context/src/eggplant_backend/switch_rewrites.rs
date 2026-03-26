@@ -388,7 +388,7 @@ pub(crate) mod native {
         let ty = schema_dsl::Type::query_leaf();
         let x = schema_dsl::Constant::query_leaf();
         let y = schema_dsl::Constant::query_leaf();
-        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
+        let if_context = schema_dsl::ContextOf::query();
         let branch_ty = schema_dsl::Type::query_leaf();
         let thn_ctx = schema_dsl::Assumption::query_leaf();
         let els_ctx = schema_dsl::Assumption::query_leaf();
@@ -397,7 +397,11 @@ pub(crate) mod native {
         let if_out_get = schema_dsl::Get::query(&if_e);
         let thn_out = schema_dsl::Get::query(&thn);
         let els_out = schema_dsl::Get::query(&els);
-        let has_arg_ty = schema_dsl::HasArgType::query_fields(&if_e, &ty);
+        let has_arg_ty = schema_dsl::HasArgType::query();
+        let if_context_matches_expr = if_context.expr.handle().eq(&if_e.handle());
+        let if_context_matches_ctx = if_context.ctx.handle().eq(&ctx.handle());
+        let has_arg_ty_matches_expr = has_arg_ty.expr.handle().eq(&if_e.handle());
+        let has_arg_ty_matches_ty = has_arg_ty.ty.handle().eq(&ty.handle());
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let thn_const_matches = thn_const.handle().eq(&thn_out.handle());
         let els_const_matches = els_const.handle().eq(&els_out.handle());
@@ -421,6 +425,10 @@ pub(crate) mod native {
         ));
 
         SwitchSelectConstPat::new(pred, ctx, ty, if_context, has_arg_ty, x, y, if_out)
+            .assert(if_context_matches_expr)
+            .assert(if_context_matches_ctx)
+            .assert(has_arg_ty_matches_expr)
+            .assert(has_arg_ty_matches_ty)
             .assert(if_out_matches)
             .assert(thn_const_matches)
             .assert(els_const_matches)
@@ -453,7 +461,7 @@ pub(crate) mod native {
         let a = schema_dsl::Expr::query_leaf();
         let ctx = schema_dsl::Assumption::query_leaf();
         let ty = schema_dsl::Type::query_leaf();
-        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
+        let if_context = schema_dsl::ContextOf::query();
         let thn_out = schema_dsl::Get::query(&thn);
         let els_out = schema_dsl::Get::query(&els);
         let thn_ctx = schema_dsl::Assumption::query_leaf();
@@ -462,7 +470,11 @@ pub(crate) mod native {
         let if_out_get = schema_dsl::Get::query(&if_e);
         let a_get = schema_dsl::Get::query(&inputs);
         let thn_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &thn_ctx));
-        let has_arg_ty = schema_dsl::HasArgType::query_fields(&if_e, &ty);
+        let has_arg_ty = schema_dsl::HasArgType::query();
+        let if_context_matches_expr = if_context.expr.handle().eq(&if_e.handle());
+        let if_context_matches_ctx = if_context.ctx.handle().eq(&ctx.handle());
+        let has_arg_ty_matches_expr = has_arg_ty.expr.handle().eq(&if_e.handle());
+        let has_arg_ty_matches_ty = has_arg_ty.ty.handle().eq(&ty.handle());
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let a_matches = a.handle().eq(&a_get.handle());
         let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
@@ -481,6 +493,10 @@ pub(crate) mod native {
         let hi_bound = hi_bound::query(&els_out).handle().eq(&y.handle());
 
         SwitchSelectElseConstPat::new(pred, a, ctx, ty, if_context, has_arg_ty, thn_ctx, y, if_out)
+            .assert(if_context_matches_expr)
+            .assert(if_context_matches_ctx)
+            .assert(has_arg_ty_matches_expr)
+            .assert(has_arg_ty_matches_ty)
             .assert(if_out_matches)
             .assert(a_matches)
             .assert(same_thn_index)
@@ -515,7 +531,7 @@ pub(crate) mod native {
         let b = schema_dsl::Expr::query_leaf();
         let ctx = schema_dsl::Assumption::query_leaf();
         let ty = schema_dsl::Type::query_leaf();
-        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
+        let if_context = schema_dsl::ContextOf::query();
         let thn_out = schema_dsl::Get::query(&thn);
         let els_out = schema_dsl::Get::query(&els);
         let els_ctx = schema_dsl::Assumption::query_leaf();
@@ -524,7 +540,11 @@ pub(crate) mod native {
         let if_out_get = schema_dsl::Get::query(&if_e);
         let b_get = schema_dsl::Get::query(&inputs);
         let els_arg_out = schema_dsl::Get::query(&schema_dsl::Arg::query(&branch_ty, &els_ctx));
-        let has_arg_ty = schema_dsl::HasArgType::query_fields(&if_e, &ty);
+        let has_arg_ty = schema_dsl::HasArgType::query();
+        let if_context_matches_expr = if_context.expr.handle().eq(&if_e.handle());
+        let if_context_matches_ctx = if_context.ctx.handle().eq(&ctx.handle());
+        let has_arg_ty_matches_expr = has_arg_ty.expr.handle().eq(&if_e.handle());
+        let has_arg_ty_matches_ty = has_arg_ty.ty.handle().eq(&ty.handle());
         let if_out_matches = if_out.handle().eq(&if_out_get.handle());
         let b_matches = b.handle().eq(&b_get.handle());
         let same_thn_index = if_out_get.handle_index().eq(&thn_out.handle_index());
@@ -543,6 +563,10 @@ pub(crate) mod native {
         let els_matches_arg = els_out.handle().eq(&els_arg_out.handle());
 
         SwitchSelectThenConstPat::new(pred, b, ctx, ty, if_context, has_arg_ty, els_ctx, y, if_out)
+            .assert(if_context_matches_expr)
+            .assert(if_context_matches_ctx)
+            .assert(has_arg_ty_matches_expr)
+            .assert(has_arg_ty_matches_ty)
             .assert(if_out_matches)
             .assert(b_matches)
             .assert(same_thn_index)
@@ -580,8 +604,10 @@ pub(crate) mod native {
         );
         let ins_ty = schema_dsl::TypeList::query_leaf();
         let ins_tuple_ty = schema_dsl::TupleT::query(&ins_ty);
-        let ins_has_type = schema_dsl::HasType::query_fields(&ins, &ins_tuple_ty);
+        let ins_has_type = schema_dsl::HasType::query();
         let switch_and_len = BaseVar::<i64, PR>::query_named("switch_and_len");
+        let ins_has_type_matches_expr = ins_has_type.expr.handle().eq(&ins.handle());
+        let ins_has_type_matches_ty = ins_has_type.ty.handle().eq(&ins_tuple_ty.handle());
         let tuple_len_known = switch_and_len.handle().eq(&prim_call::<i64>(
             "tuple-length",
             vec![ins.handle().into_handle_ty()],
@@ -590,6 +616,8 @@ pub(crate) mod native {
             crate::eggplant_backend::expr_size::native::expr_size::query(&y).handle().lt(&100_i64);
 
         SwitchAndPat::new(lhs, a, b, ins, ins_has_type, x, y, ins_ty)
+            .assert(ins_has_type_matches_expr)
+            .assert(ins_has_type_matches_ty)
             .assert(tuple_len_known)
             .assert(rhs_small)
     }
@@ -620,8 +648,10 @@ pub(crate) mod native {
         );
         let ins_ty = schema_dsl::TypeList::query_leaf();
         let ins_tuple_ty = schema_dsl::TupleT::query(&ins_ty);
-        let ins_has_type = schema_dsl::HasType::query_fields(&ins, &ins_tuple_ty);
+        let ins_has_type = schema_dsl::HasType::query();
         let switch_or_len = BaseVar::<i64, PR>::query_named("switch_or_len");
+        let ins_has_type_matches_expr = ins_has_type.expr.handle().eq(&ins.handle());
+        let ins_has_type_matches_ty = ins_has_type.ty.handle().eq(&ins_tuple_ty.handle());
         let tuple_len_known = switch_or_len.handle().eq(&prim_call::<i64>(
             "tuple-length",
             vec![ins.handle().into_handle_ty()],
@@ -632,6 +662,8 @@ pub(crate) mod native {
             crate::eggplant_backend::expr_size::native::expr_size::query(&y).handle().lt(&100_i64);
 
         SwitchOrPat::new(lhs, a, b, ins, ins_has_type, x, y, ins_ty)
+            .assert(ins_has_type_matches_expr)
+            .assert(ins_has_type_matches_ty)
             .assert(tuple_len_known)
             .assert(lhs_small)
             .assert(rhs_small)

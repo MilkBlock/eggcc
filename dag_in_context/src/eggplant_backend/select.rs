@@ -188,9 +188,13 @@ pub(crate) mod native {
 
         let same_then_index = if_out.handle_index().eq(&thn_out.handle_index());
         let same_else_index = if_out.handle_index().eq(&els_out.handle_index());
-        let thn_pure = schema_dsl::ExprIsPure::query_fields(&thn_out);
-        let els_pure = schema_dsl::ExprIsPure::query_fields(&els_out);
-        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &ctx);
+        let thn_pure = schema_dsl::ExprIsPure::query();
+        let els_pure = schema_dsl::ExprIsPure::query();
+        let if_context = schema_dsl::ContextOf::query();
+        let then_is_pure = thn_pure.expr.handle().eq(&thn_out.handle());
+        let else_is_pure = els_pure.expr.handle().eq(&els_out.handle());
+        let same_context_expr = if_context.expr.handle().eq(&if_e.handle());
+        let same_context_ctx = if_context.ctx.handle().eq(&ctx.handle());
         let thn_size = size1
             .handle()
             .eq(&crate::eggplant_backend::expr_size::native::expr_size::query(&thn_out).handle());
@@ -219,6 +223,10 @@ pub(crate) mod native {
         SelectOptPat::new(pred, inputs, ctx, t1, t2, if_out, thn_pure, els_pure, if_context)
             .assert(same_then_index)
             .assert(same_else_index)
+            .assert(then_is_pure)
+            .assert(else_is_pure)
+            .assert(same_context_expr)
+            .assert(same_context_ctx)
             .assert(thn_size)
             .assert(els_size)
             .assert(thn_small)
