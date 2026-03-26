@@ -98,7 +98,7 @@ const CONDITIONAL_PUSH_IN: &str = r#"(ruleset push-in)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::schema_dsl;
+    use super::super::schema_dsl::{self, ExprRuleCtx};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
 
@@ -197,8 +197,10 @@ pub(crate) mod native {
             push_in_pat,
             |ctx, pat| {
                 let zero = ctx._intern_base::<i64, i64>(0);
-                let orig_ins_len =
+                let orig_ins_len_val =
                     ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx).val]);
+                let orig_ins_len = ctx.devalue(eggplant::wrap::Value::<i64>::new(orig_ins_len_val));
+                let orig_input_index = ctx.devalue(pat.orig_input_i.index);
 
                 let tnil =
                     eggplant::wrap::Value::<schema_dsl::TypeList>::new((ctx).insert("TNil", &[]));
@@ -215,19 +217,7 @@ pub(crate) mod native {
                 let new_ins_ty = eggplant::wrap::Value::<schema_dsl::Type>::new(
                     (ctx).insert("TupleT", &[new_tylist.val]),
                 );
-                let new_ins = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert(
-                        "Concat",
-                        &[
-                            pat.orig_inputs.to_value(&ctx).val,
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                (&ctx).insert("Single", &[pat.x.to_value(&ctx).val]),
-                            )
-                            .to_value(&ctx)
-                            .val,
-                        ],
-                    ),
-                );
+                let new_ins = ctx.insert_concat(pat.orig_inputs, ctx.insert_single(pat.x));
 
                 let if_tr = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert(
                     "InIf",
@@ -255,10 +245,10 @@ pub(crate) mod native {
                     &[new_ins_ty.to_value(&ctx).val, if_fa.to_value(&ctx).val],
                 ));
                 let st_tr = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert("SubTuple", &[arg_tr.to_value(&ctx).val, zero, orig_ins_len]),
+                    (&ctx).insert("SubTuple", &[arg_tr.to_value(&ctx).val, zero, orig_ins_len_val]),
                 );
                 let st_fa = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert("SubTuple", &[arg_fa.to_value(&ctx).val, zero, orig_ins_len]),
+                    (&ctx).insert("SubTuple", &[arg_fa.to_value(&ctx).val, zero, orig_ins_len_val]),
                 );
                 let new_thn = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",
@@ -277,14 +267,8 @@ pub(crate) mod native {
                     ],
                 ));
 
-                let tr_replaced = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
-                    "Get",
-                    &[arg_tr.to_value(&ctx).val, pat.orig_input_i.index.val],
-                ));
-                let fa_replaced = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
-                    "Get",
-                    &[arg_fa.to_value(&ctx).val, pat.orig_input_i.index.val],
-                ));
+                let tr_replaced = ctx.insert_get(arg_tr, orig_input_index);
+                let fa_replaced = ctx.insert_get(arg_fa, orig_input_index);
                 let tr_const = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Const",
                     &[
@@ -307,11 +291,7 @@ pub(crate) mod native {
                         &[
                             pat.op.to_value(&ctx).val,
                             tr_const.to_value(&ctx).val,
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                (&ctx).insert("Get", &[arg_tr.to_value(&ctx).val, orig_ins_len]),
-                            )
-                            .to_value(&ctx)
-                            .val,
+                            ctx.insert_get(arg_tr, orig_ins_len).val,
                         ],
                     ),
                 );
@@ -321,11 +301,7 @@ pub(crate) mod native {
                         &[
                             pat.op.to_value(&ctx).val,
                             fa_const.to_value(&ctx).val,
-                            eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                                (&ctx).insert("Get", &[arg_fa.to_value(&ctx).val, orig_ins_len]),
-                            )
-                            .to_value(&ctx)
-                            .val,
+                            ctx.insert_get(arg_fa, orig_ins_len).val,
                         ],
                     ),
                 );

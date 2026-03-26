@@ -102,7 +102,7 @@ const TERM_SUBST_DECLS: &str = r#"(ruleset term-subst)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::schema_dsl::{self, HasArgTypePRRuleCtx};
+    use super::super::schema_dsl::{self, ExprRuleCtx, HasArgTypePRRuleCtx};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
         prim_call, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
@@ -591,10 +591,7 @@ pub(crate) mod native {
         });
         PeepholeTx::add_rule("term_subst_get", ruleset, term_subst_get_pat, |ctx, pat| {
             let inner = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
-            ctx.union(
-                pat.lhs,
-                eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Get", &[inner.val, pat.index.val])),
-            );
+            ctx.union(pat.lhs, ctx.insert_get(inner, ctx.devalue(pat.index)));
         });
         PeepholeTx::add_rule(
             "term_subst_alloc",
@@ -627,10 +624,7 @@ pub(crate) mod native {
             term_subst_single_pat,
             |ctx, pat| {
                 let inner = insert_term_subst(ctx, pat.ctx.val, pat.expr.val, pat.term.val);
-                ctx.union(
-                    pat.lhs,
-                    eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Single", &[inner.val])),
-                );
+                ctx.union(pat.lhs, ctx.insert_single(inner));
             },
         );
         PeepholeTx::add_rule(
