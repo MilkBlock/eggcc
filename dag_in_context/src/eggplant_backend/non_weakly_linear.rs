@@ -81,7 +81,7 @@ const NON_WEAKLY_LINEAR: &str = r#"(ruleset non-weakly-linear)
 
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
-    use super::super::schema_dsl;
+    use super::super::schema_dsl::{self, ExprRuleCtx};
     use crate::eggplant_backend::loop_invariant::native::loop_num_iters_guessRuleCtx;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{AsHandle, Insertable, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId};
@@ -259,10 +259,7 @@ pub(crate) mod native {
             ruleset,
             if_passthrough_pat,
             |ctx, pat| {
-                let passthrough = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
-                    "Get",
-                    &[pat.inputs.to_value(&ctx).val, pat.then_arg_out.index.val],
-                ));
+                let passthrough = ctx.insert_get(pat.inputs, ctx.devalue(pat.then_arg_out.index));
                 ctx.union(pat.lhs, passthrough);
             },
         );
@@ -279,7 +276,6 @@ pub(crate) mod native {
                     return;
                 }
 
-                let zero = ctx._intern_base::<i64, i64>(0);
                 let one = ctx._intern_base::<i64, i64>(1);
                 let outputs_len_value =
                     ctx.lookup_expect("tuple-length", &[pat.outputs.to_value(&ctx).val]);
@@ -294,9 +290,7 @@ pub(crate) mod native {
                         pat.outputs.to_value(&ctx).val,
                     ],
                 ));
-                let executed_once_pred = eggplant::wrap::Value::<schema_dsl::Expr>::new(
-                    (&ctx).insert("Get", &[executed_once.to_value(&ctx).val, zero]),
-                );
+                let executed_once_pred = ctx.insert_get(executed_once, 0_i64);
                 let executed_once_body =
                     eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                         "SubTuple",

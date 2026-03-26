@@ -166,7 +166,7 @@ const SWITCH_REWRITES: &str = r#"(ruleset switch_rewrite)
 #[cfg(feature = "eggplant")]
 pub(crate) mod native {
     // Required by the `#[eggplant::dsl]` expansion below.
-        use super::super::schema_dsl;
+    use super::super::schema_dsl::{self, ExprRuleCtx};
     use crate::eggplant_backend::interval_bounds::{hi_bound, lo_bound, IntB};
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
@@ -742,7 +742,7 @@ pub(crate) mod native {
             switch_and_pat,
             |ctx, pat| {
                 let len = eggplant::wrap::Value::<i64>::new((ctx).insert("tuple-length", &[pat.ins.val]));
-                let single_b = eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Single", &[pat.b.val]));
+                let single_b = ctx.insert_single(pat.b);
                 let outer_ins =
                     eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Concat", &[single_b.val, pat.ins.val]));
                 let bool_ty = eggplant::wrap::Value::<schema_dsl::BaseType>::new((ctx).insert("BoolT", &[]));
@@ -753,7 +753,7 @@ pub(crate) mod native {
                 let if_false = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InIf", &[false.to_value(&ctx).val, pat.a.val, outer_ins.val]));
                 let arg_true = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[outer_ins_ty.val, if_true.val]));
                 let arg_false = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[outer_ins_ty.val, if_false.val]));
-                let inner_pred = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[arg_true.val, 0_i64.to_value(&ctx).val]));
+                let inner_pred = ctx.insert_get(arg_true, 0_i64);
                 let sub_arg_true = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[arg_true.val, 1_i64.to_value(&ctx).val, len.val]));
                 let sub_arg_false = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[arg_false.val, 1_i64.to_value(&ctx).val, len.val]));
                 let inner_false_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InIf", &[
@@ -780,7 +780,7 @@ pub(crate) mod native {
             switch_or_pat,
             |ctx, pat| {
                 let len = eggplant::wrap::Value::<i64>::new((ctx).insert("tuple-length", &[pat.ins.val]));
-                let single_b = eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Single", &[pat.b.val]));
+                let single_b = ctx.insert_single(pat.b);
                 let outer_ins =
                     eggplant::wrap::Value::<schema_dsl::Expr>::new((ctx).insert("Concat", &[single_b.val, pat.ins.val]));
                 let bool_ty = eggplant::wrap::Value::<schema_dsl::BaseType>::new((ctx).insert("BoolT", &[]));
@@ -791,7 +791,7 @@ pub(crate) mod native {
                 let if_false = eggplant::wrap::Value::<schema_dsl::Assumption>::new((&ctx).insert("InIf", &[false.to_value(&ctx).val, pat.a.val, outer_ins.val]));
                 let arg_true = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[outer_ins_ty.val, if_true.val]));
                 let arg_false = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Arg", &[outer_ins_ty.val, if_false.val]));
-                let inner_pred = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Get", &[arg_false.val, 0_i64.to_value(&ctx).val]));
+                let inner_pred = ctx.insert_get(arg_false, 0_i64);
                 let sub_arg_true = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[arg_true.val, 1_i64.to_value(&ctx).val, len.val]));
                 let sub_arg_false = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[arg_false.val, 1_i64.to_value(&ctx).val, len.val]));
                 let outer_x = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[if_true.val, sub_arg_true.val, pat.x.val]));
