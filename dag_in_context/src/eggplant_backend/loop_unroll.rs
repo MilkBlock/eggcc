@@ -265,7 +265,7 @@ pub(crate) mod native {
                 return;
             };
 
-            let one_iter = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[outputs, ctx._intern_base::<i64, i64>(1), num_inputs]));
+            let one_iter = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("SubTuple", &[outputs, 1_i64.to_value(&ctx).val, num_inputs]));
             let tmp_ctx = eggplant::wrap::Value::<schema_dsl::Assumption>::new((ctx).insert("LoopUnrollTmpCtx", &[]));
 
             let subst_once = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert("Subst", &[

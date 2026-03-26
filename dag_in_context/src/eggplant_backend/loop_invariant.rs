@@ -1067,7 +1067,7 @@ pub(crate) mod native {
             ruleset,
             loop_invariant_motion_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
+                let zero = 0_i64.to_value(&ctx).val;
                 let len_val = ctx.lookup_expect("tuple-length", &[pat.in_expr.to_value(&ctx).val]);
                 let len = ctx.devalue(eggplant::wrap::Value::<i64>::new(len_val));
                 let iter_guess = ctx.read_loop_num_iters_guess(pat.in_expr, pat.body);

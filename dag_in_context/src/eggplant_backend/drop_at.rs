@@ -338,7 +338,7 @@ pub(crate) mod native {
     use super::super::schema_dsl;
     use crate::eggplant_backend::peepholes::native::PeepholeTx;
     use eggplant::prelude::{
-        prim_call, BaseVar, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
+        prim_call, BaseVar, Insertable, IntoHandleTy, PEq, PatRecSgl, RuleRunnerSgl, RuleSetId,
     };
 
     fn expr_leaf<PR: PatRecSgl>() -> schema_dsl::Expr<PR> {
@@ -1068,7 +1068,7 @@ pub(crate) mod native {
                 let new_index = if source_index < idx {
                     pat.source_index.val
                 } else {
-                    ctx._intern_base::<i64, i64>(source_index - 1)
+                    (source_index - 1).to_value(&ctx).val
                 };
                 let rewritten = eggplant::wrap::Value::<schema_dsl::Expr>::new(
                     (ctx).insert("Get", &[new_arg.val, new_index]),

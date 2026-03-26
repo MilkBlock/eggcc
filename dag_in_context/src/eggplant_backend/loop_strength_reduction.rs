@@ -288,7 +288,7 @@ pub(crate) mod native {
             ruleset,
             loop_strength_reduction_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
+                let zero = 0_i64.to_value(&ctx).val;
                 let n = ctx.lookup_expect("tuple-length", &[pat.inputs.to_value(&ctx).val]);
 
                 let mul_op = eggplant::wrap::Value::<schema_dsl::BinaryOp>::new((ctx).insert("Mul", &[]));

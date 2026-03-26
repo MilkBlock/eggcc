@@ -276,11 +276,11 @@ pub(crate) mod native {
                     return;
                 }
 
-                let one = ctx._intern_base::<i64, i64>(1);
+                let one = 1_i64.to_value(&ctx).val;
                 let outputs_len_value =
                     ctx.lookup_expect("tuple-length", &[pat.outputs.to_value(&ctx).val]);
                 let outputs_len: i64 = ctx._devalue_base(outputs_len_value);
-                let outputs_body_len = ctx._intern_base::<i64, i64>(outputs_len - 1);
+                let outputs_body_len = (outputs_len - 1).to_value(&ctx).val;
 
                 let executed_once = eggplant::wrap::Value::<schema_dsl::Expr>::new((&ctx).insert(
                     "Subst",

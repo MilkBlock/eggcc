@@ -570,7 +570,7 @@ pub(crate) mod native {
             ruleset,
             cicm_uop_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
+                let zero = 0_i64.to_value(&ctx).val;
                 let orig_ins_len =
                     ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx).val]);
 
@@ -735,7 +735,7 @@ pub(crate) mod native {
             ruleset,
             cicm_bop_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
+                let zero = 0_i64.to_value(&ctx).val;
                 let orig_ins_len =
                     ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx).val]);
 

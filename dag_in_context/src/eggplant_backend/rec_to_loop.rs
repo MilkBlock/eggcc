@@ -364,8 +364,8 @@ pub(crate) mod native {
         pat: &<RecToLoopAccumPat<PR> as PatVars<PR>>::Valued,
         kind: AccumRuleKind,
     ) {
-        let zero = ctx._intern_base::<i64, i64>(0);
-        let one = ctx._intern_base::<i64, i64>(1);
+        let zero = 0_i64.to_value(&ctx).val;
+        let one = 1_i64.to_value(&ctx).val;
         let always_runs_len =
             ctx.lookup_expect("tuple-length", &[pat.always_runs.to_value(&ctx).val]);
         let acc_op = eggplant::wrap::Value::<schema_dsl::BinaryOp>::new(
@@ -429,7 +429,7 @@ pub(crate) mod native {
             "Arg",
             &[pat.start_ty.to_value(&ctx).val, then_ctx.to_value(&ctx).val],
         ));
-        let initial_int = ctx._intern_base::<i64, i64>(kind.initial_int());
+        let initial_int = kind.initial_int().to_value(&ctx).val;
         let initial_const = eggplant::wrap::Value::<schema_dsl::Expr>::new(
             (&ctx).insert(
                 "Const",

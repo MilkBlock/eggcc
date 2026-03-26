@@ -395,8 +395,8 @@ pub(crate) mod native {
             hacker_loop_state_edge_pat,
             |ctx, pat| {
                 let j = ctx.devalue(pat.arg_j.index);
-                let j_val = ctx._intern_base::<i64, i64>(j);
-                let j_plus_one = ctx._intern_base::<i64, i64>(j + 1);
+                let j_val = j.to_value(&ctx).val;
+                let j_plus_one = (j + 1).to_value(&ctx).val;
 
                 let new_lp_inputs = eggplant::wrap::Value::<schema_dsl::Expr>::new(
                     (&ctx).insert("TupleRemoveAt", &[pat.lpinputs.to_value(&ctx).val, j_val]),

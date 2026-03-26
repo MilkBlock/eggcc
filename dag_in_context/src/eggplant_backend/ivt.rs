@@ -929,7 +929,7 @@ pub(crate) mod native {
         let ruleset = RuleSetId("loop-inversion");
 
         PeepholeTx::add_rule("loop_inversion", ruleset, loop_inversion_pat, |ctx, pat| {
-            let zero = ctx._intern_base::<i64, i64>(0);
+            let zero = 0_i64.to_value(&ctx).val;
             let if_inputs_len =
                 ctx.lookup_expect("tuple-length", &[pat.if_inputs.to_value(&ctx).val]);
             let passthrough_len =

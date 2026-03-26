@@ -196,7 +196,7 @@ pub(crate) mod native {
             ruleset,
             push_in_pat,
             |ctx, pat| {
-                let zero = ctx._intern_base::<i64, i64>(0);
+                let zero = 0_i64.to_value(&ctx).val;
                 let orig_ins_len_val =
                     ctx.lookup_expect("TypeList-length", &[pat.tylist.to_value(&ctx).val]);
                 let orig_ins_len = ctx.devalue(eggplant::wrap::Value::<i64>::new(orig_ins_len_val));
