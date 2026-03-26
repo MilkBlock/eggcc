@@ -276,10 +276,14 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let same_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_ty = has_arg_type.ty.handle().eq(&ty.handle());
 
         TermSubstTypePat::new(lhs, ty, has_arg_type)
             .assert(lhs_is_term_subst)
+            .assert(same_expr)
+            .assert(same_ty)
     }
 
     fn term_subst_arg_pat<PR: PatRecSgl>() -> TermSubstArgPat<PR> {
@@ -313,10 +317,14 @@ pub(crate) mod native {
                 term.handle().into_handle_ty(),
             ],
         ));
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let same_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_ty = has_arg_type.ty.handle().eq(&ty.handle());
 
         TermSubstConstPat::new(lhs, ctx, expr, constant, ty, has_arg_type)
             .assert(lhs_is_term_subst)
+            .assert(same_expr)
+            .assert(same_ty)
     }
 
     fn term_subst_empty_pat<PR: PatRecSgl>() -> TermSubstEmptyPat<PR> {
@@ -332,10 +340,14 @@ pub(crate) mod native {
                 prim_call::<schema_dsl::Term>("TermEmpty", vec![]).into_handle_ty(),
             ],
         ));
-        let has_arg_type = schema_dsl::HasArgType::query_fields(&expr, &ty);
+        let has_arg_type = schema_dsl::HasArgType::query();
+        let same_expr = has_arg_type.expr.handle().eq(&expr.handle());
+        let same_ty = has_arg_type.ty.handle().eq(&ty.handle());
 
         TermSubstEmptyPat::new(lhs, ctx, expr, ty, has_arg_type)
             .assert(lhs_is_term_subst)
+            .assert(same_expr)
+            .assert(same_ty)
     }
 
     fn term_subst_top_pat<PR: PatRecSgl>() -> TermSubstTopPat<PR> {

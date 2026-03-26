@@ -142,12 +142,21 @@ pub(crate) mod native {
         let x_ty = schema_dsl::BaseType::query_leaf();
         let x_ty_expr = schema_dsl::Base::query(&x_ty);
 
-        let if_context = schema_dsl::ContextOf::query_fields(&if_e, &outer_ctx);
+        let if_context = schema_dsl::ContextOf::query();
         let input_matches = orig_input_i.handle().eq(&pushed_expr.handle());
-        let then_arg_type = schema_dsl::HasArgType::query_fields(&thn, &branch_arg_ty);
-        let else_arg_type = schema_dsl::HasArgType::query_fields(&els, &branch_arg_ty);
-        let x_has_type = schema_dsl::HasType::query_fields(&x, &x_ty_expr);
-        let pure_base = schema_dsl::PureBaseType::query_fields(&x_ty);
+        let same_if_expr = if_context.expr.handle().eq(&if_e.handle());
+        let same_if_ctx = if_context.ctx.handle().eq(&outer_ctx.handle());
+        let then_arg_type = schema_dsl::HasArgType::query();
+        let else_arg_type = schema_dsl::HasArgType::query();
+        let same_then_expr = then_arg_type.expr.handle().eq(&thn.handle());
+        let same_then_ty = then_arg_type.ty.handle().eq(&branch_arg_ty.handle());
+        let same_else_expr = else_arg_type.expr.handle().eq(&els.handle());
+        let same_else_ty = else_arg_type.ty.handle().eq(&branch_arg_ty.handle());
+        let x_has_type = schema_dsl::HasType::query();
+        let same_x_expr = x_has_type.expr.handle().eq(&x.handle());
+        let same_x_ty = x_has_type.ty.handle().eq(&x_ty_expr.handle());
+        let pure_base = schema_dsl::PureBaseType::query();
+        let pure_base_matches = pure_base.ty.handle().eq(&x_ty.handle());
 
         PushInPat::new(
             if_e,
@@ -168,6 +177,15 @@ pub(crate) mod native {
             orig_input_i,
         )
         .assert(input_matches)
+        .assert(same_if_expr)
+        .assert(same_if_ctx)
+        .assert(same_then_expr)
+        .assert(same_then_ty)
+        .assert(same_else_expr)
+        .assert(same_else_ty)
+        .assert(same_x_expr)
+        .assert(same_x_ty)
+        .assert(pure_base_matches)
     }
 
     pub(crate) fn register_native_rules() -> RuleSetId {
